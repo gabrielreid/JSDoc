@@ -83,6 +83,10 @@ data structure has the following form (for each class):
       |  |
       |  +- field_vars
       |
+      +- inner_classes
+      |  |
+      |  +- class_name
+      |
       +- inherits
          |
          +- Class
@@ -93,39 +97,71 @@ data structure has the following form (for each class):
 
 =head1 AUTHOR
 
-mmathews@jscan.org,
-Gabriel Reid gab_reid@users.sourceforge.net
+Gabriel Reid gab_reid@users.sourceforge.net,
+Michael Mathews michael@mathews.net
 
 =cut
 
 require 5.000;
-use Carp;
+use strict;
+use warnings;
 use Exporter;
 use Data::Dumper;
 
-@ISA = qw(Exporter);
-@EXPORT = qw(parse_code_tree reset_parser);
+use vars qw/ @ISA @EXPORT /;
 
-use vars qw/ %CLASSES %FUNCTIONS /;
+@ISA = qw(Exporter);
+@EXPORT = qw(parse_code_tree configure_parser reset_parser);
+
+# State
+use vars qw/ %CLASSES %FUNCTIONS %CONFIG $CTX_FILE /;
+
+# Regexes
+use vars qw/ $BAL_PAREN $BAL_BRACE $SQUOTE $DQUOTE $NONQUOTE 
+               $FUNC_DEF $ANON_FUNCTION $LITERAL $FUNC_CALL $JSDOC_COMMENT 
+               $MLINE_COMMENT $SLINE_COMMENT /;
+
+$BAL_PAREN = qr/\((?:[^()]|(??{$BAL_PAREN}))*\)/;
+$BAL_BRACE = qr/\{(?:[^{}]|(??{$BAL_BRACE}))*\}/;
+$SQUOTE = qr{'[^'\\]*(?:\\.[^'\\]*)*'};
+$DQUOTE = qr{"[^"\\]*(?:\\.[^"\\]*)*"};
+$NONQUOTE = qr{[^"'/]};
+$FUNC_DEF = qr/function\s+\w+(?:\.\w+)*\s*$BAL_PAREN\s*$BAL_BRACE/;
+$ANON_FUNCTION = qr/function\s*$BAL_PAREN\s*$BAL_BRACE/;
+$LITERAL = qr/$DQUOTE|$SQUOTE|\d+/;
+$FUNC_CALL = qr/(?:new\s+)?\w+(?:\.\w+)*\s*$BAL_PAREN/;
+$JSDOC_COMMENT = qr{/\*\*[^*]*\*+(?:[^/*][^*]*\*+)*/};
+$MLINE_COMMENT = qr{/\*[^*]*\*+(?:[^/*][^*]*\*+)*/};
+$SLINE_COMMENT = qr{//[^\n]*};
+
+
 #
 # Public function that returns a datastructure representing the JS classes
 # and their documentation
 #
 sub parse_code_tree {
-   for my $js_src (map { ${$_} } @_){
-      
+
+   #
+   # This (I mean the "<<$_>>") is pretty hacky, but I've made it this 
+   # way to maintain backwards compatibility with anyone who's automatically 
+   # expecting this to work when they throw an array of refs to it. If you're
+   # using this for your own work, please don't expect to be able to 
+   # put the context file in like this in the future
+   #
+   for my $js_src (map { ref and ${$_} or "<<$_>>" } @_){
+
+      if ($js_src =~ /^<<(.+)>>$/){
+         $CTX_FILE = $1;
+         next;
+      }
+
       # perlify os line-endings
       $js_src =~ s/(\r\n|\r)/\n/g;
 
-      # remove all uninteresting comments, but only if they're not inside
-      # of other comments
-      {
-         no warnings;
-         $js_src =~ s{(/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)|//.*}{$1}g;
-      }
-
+      $js_src = &preprocess_source($js_src);
       &fetch_funcs_and_classes($js_src);
    }
+   
    &map_all_properties();
 
    &build_class_hierarchy(); 
@@ -173,10 +209,15 @@ sub parse_jsdoc_comment {
    # be many variables with the same name)
    if($variable_str) {
        my %vars = ();
-       while ($variable_str =~ /(?!\{)\@(\w+)(?!\})\s*([^\@]*)\s*/gs) {
+       while ($variable_str =~ /
+          (?<!\{)\@(\w+)      # The @attribute, but not a {@link}
+          \s*
+          ((?:\{\@|[^\@])*)            # Everything up to the next @attribute
+          /gsx) {
            my ($name, $val) = ($1, $2);
            $vars{$name} = [] unless defined $vars{$name};
-           push(@{$vars{$name}}, $val);
+           $val =~ s/\n/ /g;
+           push(@{$vars{$name}}, ($val =~ /^\s*(.*)\s*$/)[0]);
        }
        $parsed{vars} = \%vars;
    }
@@ -201,21 +242,22 @@ sub fetch_funcs_and_classes {
          )?
          
          # Function
-         (?:(?:function\s*(\w+)\s*(\(.*?\))\s*\{)|         
+         (?:(?:function\s+(\w+)\s*(\(.*?\))\s*\{)|         
          
          # Anonymous function
-         (?:(\w+)(\.prototype)?\.(\w+)\s*=\s*function\s*(\(.*?\)))|  
+         (?:(\w+(?:\.\w+)*?)(\.prototype)?\.(\w+)\s*=\s*function\s*(\(.*?\)))|  
 
          # Instance property 
-         (?:(\w+)\.prototype\.(\w+)\s*=\s*(.*?);)|    
+         (?:(\w+(?:\.\w+)*?)\.prototype\.(\$?\w+)\s*=\s*(.*?)\s*[;\n])|    
 
          #Inheritance
-         (?:(\w+)\.prototype\s*=\s*new\s*(\w+)\(.*?\)\s*;)| 
+         (?:(\w+(?:\.\w+)*?)\.prototype\s*=
+                           \s*new\s*(\w+(?:\.\w+)*?)\(.*?\)\s*[;\n])| 
 
          # Class property
-         (?:(\w+)\.(\w+)\s*=\s*(.*?);))        
+         (?:(\w+(?:\.\w+)*?)\.(\$?\w+)\s*=\s*(.*?)\s*[;\n]))        
       !gsx){
-
+    
       my $doc;
       $doc = $1 or $doc = "";
 
@@ -224,12 +266,8 @@ sub fetch_funcs_and_classes {
          my ($func, $arglist, $post) = ($2, $3, $');
          &add_function($doc, $func, $arglist);
          if ($doc =~ /\@constructor/){
-            # 
-            # Because this is marked as a constructor, we always add it
-            # as a class
-            #
+            # Add all @constructor methods as classes
             &add_class($func);
-            $js_src = &evaluate_constructor($doc, $func, $arglist, $post);
          }
       } elsif ($4 && $6 && $FUNCTIONS{$4}){
          # Anonymous functions added onto a class or class prototype
@@ -241,8 +279,8 @@ sub fetch_funcs_and_classes {
          &add_property($doc, $8, $9, $10, 0);
       } elsif ($11 && $12){
          &set_base_class($11, $12);
-      } elsif ($13 && $14 && $15 && $14 ne 'prototype' 
-         && $13 ne 'this' && $FUNCTIONS{$13}){
+      } elsif ($13 && $14 && defined($15) && $14 ne 'prototype' 
+         && $13 ne 'this' && ($FUNCTIONS{$13} or $CLASSES{$13})){
             &add_property($doc, $13, $14, $15, 1);
       }
    }
@@ -262,6 +300,7 @@ sub add_anonymous_function {
    &add_function($doc, $fake_name, $arg_list, $is_private) and
       &add_property(
          $doc, $class, $function_name, $fake_name, $is_class_prop);
+   &add_class("$class.$function_name") if $doc =~ /\@constructor/;
 
 }
 
@@ -277,6 +316,7 @@ sub add_class {
       $CLASSES{$class}->{class_fields} = [];
       $CLASSES{$class}->{instance_methods} = [];
       $CLASSES{$class}->{class_methods} = [];
+      $CLASSES{$class}->{inner_classes} = [];
    }
 }
 
@@ -320,6 +360,19 @@ sub add_property {
 #
 sub add_function {
    my ($doc, $function, $arg_list, $is_private) = @_;
+
+   # clean remaining comments out of arg list
+   # (all others are already gone)
+   # Again, taken from Jeffrey Friedl's "Mastering Regular Expressions"
+   {
+      no warnings;
+      $arg_list =~ s/
+         ($NONQUOTE+|
+            $DQUOTE$NONQUOTE*|
+            $SQUOTE$NONQUOTE*)
+         |$MLINE_COMMENT|$SLINE_COMMENT/$1/gx;
+   }
+
    if ($FUNCTIONS{$function}){
       warn "Function $function already declared\n";
       return 0;
@@ -336,6 +389,7 @@ sub add_function {
    $function_ref->{description} = $documentation->{summary};
 
    $function_ref->{vars} = $function_ref->{documentation}->{vars};
+   $function_ref->{vars}->{filename} = $CTX_FILE;
    $function_ref->{vars}->{private} = 1 if $is_private;
    1;
 }
@@ -368,11 +422,31 @@ sub map_all_properties {
    }
 
    # Map all the unattached functions
-   my $classname = '[default context]';
+   my $classname = $CONFIG{GLOBALS_NAME} || 'GLOBALS';
    &add_class($classname);
    for my $function (grep !($FUNCTIONS{$_}->{is_mapped} || $CLASSES{$_}), 
       keys %FUNCTIONS){
          &map_single_property($classname, $function, $function, '', undef, 1);
+   }
+
+   # Map static inner classes
+   for $classname (keys %CLASSES){
+      my $i = 0;
+      my @to_remove;
+      for my $cprop (@{$CLASSES{$classname}->{class_methods}}){
+         my $propname = $cprop->{mapped_name};
+         if ($CLASSES{"$classname.$propname"}){
+            push @to_remove, $i;
+            push @{$CLASSES{$classname}->{inner_classes}}, 
+               {class_name => "$classname." . $cprop->{mapped_name}};
+            $FUNCTIONS{"$classname.$propname"} = 
+               delete $FUNCTIONS{"__$classname.$propname"};
+         } 
+         $i++;
+      }
+      for (reverse @to_remove){
+         splice(@{$CLASSES{$classname}->{class_methods}}, $_, 1);
+      }
    }
 }
 
@@ -382,7 +456,6 @@ sub map_all_properties {
 sub map_single_property {
    my ($class, $prop_name, $prop_val, 
       $description, $vars, $is_class_prop) = @_;
-
    if (!$FUNCTIONS{$prop_val}){
       if (!$is_class_prop){
          push @{$CLASSES{$class}->{instance_fields}}, { 
@@ -465,8 +538,19 @@ sub handle_instance_methods {
    if ($superclass->{instance_methods}){
       INSTANCE_METHODS: 
       for my $base_method (@{$superclass->{instance_methods}}){
-         for $method (@{$class->{instance_methods}}){
+         for my $method (@{$class->{instance_methods}}){
             if ($$base_method{mapped_name} eq $$method{mapped_name}){
+               # Carry over the description for overridden methods with
+               # no description (to be javadoc compliant)
+               if (($base_method->{description} or $base_method->{vars}) 
+                     and not $method->{description}){
+                  $method->{description} = $base_method->{description};
+                  for my $varkey (keys(%{$base_method->{vars}})){
+                     $method->{vars}->{$varkey} 
+                        = $base_method->{vars}->{$varkey}
+                           unless $method->{vars}->{$varkey};
+                  }
+               }
                next INSTANCE_METHODS;
             }
          }
@@ -520,61 +604,199 @@ sub set_class_constructors {
    }
 }
 
-#
-# Handles a function that has been denoted as a constructor by looking for
-# inner functions and properties. Returns the source code minus the
-# body of the constructor
-#
-sub evaluate_constructor {
-   my ($doc, $classname, $arglist, $post) = @_;
-   my $braces = 0;
-   my $func_def = '';   
-   while ($braces != -1 and $post =~ /^.*?(\}|\{)/s){
-      $post = $';
-      $func_def .= "$&" if $braces == 0;
-      $braces += ($1 eq '{' ? 1 : -1 );
-   }
-  
-   # Build a table of internally defined public methods
-   my %method_map;
-   while (($func_def =~ /this.(\w+)\s*=\s*([_a-zA-Z]+\w*)\s*;/g)){
-      $method_map{$2} = $1;
-   }
-   $func_def =~ s/this(?=\.\w+\s*=\s*function)/$classname.prototype/g;
-   
-   my %inner_funcs = map { $_ => 1 } $func_def =~ /function\s+(\w+)/g;
- 
-   $func_def =~ 
-      s/
-         this(?=\.\w+\s*=\s*
-         (('[^'\n]*')|("[^"\n]*")|\w+))/$classname.prototype/gx;
-
-   $func_def =~ s/
-      function\s+(\w+)
-      (?=\([^)]*\))/
-      {
-         "$classname.prototype." . 
-         ($method_map{$1} ? $method_map{$1} : "__________$1") . 
-         " = function"
-      }/egx;
-   
-   # Sweep out all the converted assignments of inner functions
-   $func_def =~ s/
-   ($classname\.prototype\.\w+\s*=\s*(\w+))/
-   {
-      $inner_funcs{$2} ? '' : "$1"
-   }/egx;
-   &fetch_funcs_and_classes($func_def);
-   return $post;
-}
-
 # 
 # Clear out everything from the parsed classes and functions
 #
-sub reset_parser 
-{
+sub reset_parser {
 	%CLASSES = ();
 	%FUNCTIONS = ();
+}
+
+#
+# Set global parameters for the parser
+#
+sub configure_parser {
+   %CONFIG = @_;
+}
+
+#
+# Run through the source and convert 'confusing' JavaScript constructs
+# into ones that are understood by the parser, as well as stripping
+# out unwanted comment blocks. 
+#
+# For example:
+#  
+#  Foo.prototype = { 
+#     bar: function(){ return "Eep!"; },
+#     baz: "Ha!"
+#  } 
+#
+#  becomes
+#
+#  Foo.prototype.bar = function(){ return "Eep!"; };
+#  Foo.prototype.baz = "Ha!";
+#
+sub preprocess_source {
+   my ($src) = @_;
+
+   
+   # Convert:
+   #     /** @constructor */
+   #     Foo.Bar = function(){...}
+   # to:
+   #     /** @constroctor */
+   #     Foo.Bar = function(){}
+   #     /** @constructor */
+   #     function Foo.Bar(){...}
+   #
+   # Note that we have to keep the original declaration so that Foo.Bar
+   # can be recognized as a nested class. Yes, I know it's bad...
+   $src =~ s!
+      ($JSDOC_COMMENT\s*)
+      (\w+(?:\.\w+)*?)
+      \s*=
+      (\s*function)(?=\s*$BAL_PAREN\s*\{)
+      !index($1, '@constructor') == -1 ? "$1$2 = $3" : "$1$2 = function(){};\n$1$3 $2"!esgx;
+
+
+   
+   # remove all uninteresting comments, but only if they're not inside
+   # of other comments     
+   # (adapted from Jeffrey Friedl's "Mastering Regular Expressions"
+   {
+      no warnings;
+      $src =~ s/
+         ($NONQUOTE+|
+            $JSDOC_COMMENT$NONQUOTE*|
+            $DQUOTE$NONQUOTE*|
+            $SQUOTE$NONQUOTE*)
+         |$MLINE_COMMENT|$SLINE_COMMENT/$1/gx;
+   }
+
+   # Alter the prototype-initialization blocks
+   while($src =~ s!
+      (\w+(?:\.\w+)*)\.prototype
+      \s*=\s*
+      (\{
+      .*
+      )
+      !
+      my ($pre, $post) = &find_balanced_block('{', '}', $2);
+      &deconstruct_prototype($1, $pre) . $post!esx){}
+   
+   $src =~ s!
+      ($JSDOC_COMMENT\s*)
+      ($FUNC_DEF)
+      !&deconstruct_constructor($1, $2)!megx;
+
+   $src;
+}
+
+
+#
+# A helper to preprocess_source, change prototype-initialization
+# blocks into multiple prototype-property assignments
+#
+sub deconstruct_prototype {
+   my ($class, $src) = @_;
+   $src =~ s/^\{(.*)\}$/$1/s;
+   $src =~ s!
+      (\w+)
+      \s*:\s*
+      (
+      $FUNC_DEF
+      |
+      $FUNC_CALL
+      |
+      $LITERAL
+      |
+      \w+
+      )
+      \s*,?
+   !$class.prototype.$1 = $2;!gsx;
+   $src;
+}
+
+#
+# Unpacks a constructor into separate calls
+#
+sub deconstruct_constructor {
+   my ($doc, $func_def) = @_;
+   return "$doc$func_def" unless $doc =~ /\@constructor/;
+   my ($classname) = $func_def =~ /function\s+(\w+(?:\.\w+)*)/;
+   $func_def =~ s/
+      ($BAL_BRACE)
+      /&deconstruct_inner_constructor($classname, $1)/emx;
+   "$doc$func_def";
+}
+
+sub deconstruct_inner_constructor {
+   my ($classname, $inner_src) = @_;
+   $inner_src = substr($inner_src, 1, -1);
+   my @doc_n_fnames = $inner_src =~ /($JSDOC_COMMENT?)\s*function\s+(\w+)/;
+   $inner_src =~ s/
+      ($JSDOC_COMMENT)?
+      \s*
+      var
+      \s+
+      (\w+)/&privatize_comment($1) . "\n$classname\.prototype\.$2"/egmx;
+
+   $inner_src =~ s/
+      ($JSDOC_COMMENT)?\s*
+      ^\s*
+      function
+      \s+
+      (\w+)
+      /&privatize_comment($1) . "\n$classname\.prototype\.$2 = function"/egmx;
+
+   { 
+      no warnings;
+      $inner_src =~ s/
+         ($JSDOC_COMMENT\s*)?
+         ^\s*this(?=\.)
+         /$1$classname.prototype/gmx;
+   }
+
+   # Replace all bindings of private methods to public names
+   for (my $i = 0; $i < @doc_n_fnames; $i += 2)
+   {
+      my ($doc, $fname) = @doc_n_fnames[$i, $i + 1];
+      $inner_src =~ s/
+         ($JSDOC_COMMENT\s*
+         $classname\.prototype\.\w+)
+         \s*=\s*
+         $fname\s*[\n;]
+         /$1 = function(){}/gx;
+
+      $inner_src =~ s/
+         ($classname\.prototype\.\w+)
+         \s*=\s*
+         $fname\s*[\n;]
+         /$doc\n$1 = function(){}/gx;
+   }
+   "{}\n$inner_src";
+
+}
+
+sub privatize_comment {
+   return "\n/** \@private */" unless $_[0];
+   substr($_[0], 0, -2) . " \n\@private \n*/";
+}
+
+#
+# This is here to stop perl from segfaulting from deep recursion in regexes
+#
+sub find_balanced_block {
+   my ($open_token, $close_token, $text) = @_;
+   my ($count, $open, $close) = (0, 0, 0);
+   for (split //, $text){
+      $count++;
+      $open++ if $_ eq $open_token;
+      $close++ if $_ eq $close_token;
+      last unless ($open != $close);
+   }
+   warn "Unbalanced block\n" if ($open != $close);
+   (substr($text, 0, $count), substr($text, $count)); 
 }
 
 1;
