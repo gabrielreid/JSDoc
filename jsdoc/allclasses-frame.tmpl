@@ -3,14 +3,14 @@
 <HTML>
 <HEAD>
 <TITLE>
-<TMPL_VAR NAME="project_name"> All Classes
+<TMPL_VAR NAME="project_name"> <TMPL_VAR NAME="filename"> 
 </TITLE>
 <LINK REL ="stylesheet" TYPE="text/css" HREF="stylesheet.css" TITLE="Style">
 </HEAD>
 <SCRIPT>
 function asd()
 {
-parent.document.title="<TMPL_VAR NAME="project_name"> All Classes";
+parent.document.title="<TMPL_VAR NAME="project_name"> <TMPL_VAR NAME="filename">";
 }
 </SCRIPT>
 <BODY BGCOLOR="white" onload="asd();">
@@ -19,7 +19,7 @@ parent.document.title="<TMPL_VAR NAME="project_name"> All Classes";
 </TMPL_IF>
 <H3 class="FrameHeadingFont"><B><TMPL_VAR NAME="project_name"></B></H3>
 <FONT size="+1" CLASS="FrameHeadingFont">
-<B>All Classes</B></FONT>
+<B><TMPL_VAR NAME="filename"></B></FONT>
 <BR>
 
 <TABLE BORDER="0" WIDTH="100%">

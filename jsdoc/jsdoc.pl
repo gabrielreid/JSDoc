@@ -14,6 +14,7 @@ use File::Basename;
 use Getopt::Long;
 use File::Find;
 use Data::Dumper;
+use lib dirname($0);
 use JSDoc;
 
 
@@ -21,16 +22,17 @@ use constant LOCATION => dirname($0) . '/';
 use constant MAIN_TMPL => LOCATION . "main.tmpl";
 use constant ALLCLASSES_TMPL => LOCATION . 'allclasses-frame.tmpl';
 use constant ALLCLASSES_NOFRAME_TMPL => LOCATION . 'allclasses-noframe.tmpl';
+use constant OVERVIEW_FRAME_TMPL => LOCATION . 'overview-frame.tmpl';
 use constant TREE_TMPL => LOCATION . 'overview-tree.tmpl';
 use constant OVERVIEW_TMPL => LOCATION . 'overview-summary.tmpl';
 use constant INDEX_TMPL => LOCATION . 'index.tmpl';
 use constant DEFAULT_DEST_DIR => 'js_docs_out/';
 use constant STYLESHEET => 'stylesheet.css';
-use constant HELP_TMPL => 'help-doc.tmpl';
+use constant HELP_TMPL => LOCATION . 'help-doc.tmpl';
 use constant INDEX_ALL_TMPL => LOCATION . 'index-all.tmpl';
 
-use vars qw/ $TMPL $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX 
-            %CLASS_ATTRS_MAP %METHOD_ATTRS_MAP %OPTIONS /;
+use vars qw/ $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX %TMPL_CACHE
+            %CLASS_ATTRS_MAP %METHOD_ATTRS_MAP %OPTIONS @FILENAMES /;
 
 #
 # Begin main execution
@@ -41,10 +43,6 @@ use vars qw/ $TMPL $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX
 
 do '.jsdoc_config';
 warn "Error parsing config file: $@\n" if $@;
-
-$TMPL = new HTML::Template( 
-   die_on_bad_params => 0, 
-   filename => MAIN_TMPL);
 
 my @sources;
 if (@ARGV < 1 || $OPTIONS{HELP} || !(@sources = &load_sources())){
@@ -58,31 +56,61 @@ mkdir($OPTIONS{OUTPUT})
    unless (-e $OPTIONS{OUTPUT} && -d $OPTIONS{OUTPUT});
 
 # Parse the code tree
+&configure_parser(GLOBALS_NAME => $OPTIONS{GLOBALS_NAME});
 $CLASSES = &parse_code_tree(@sources);
 &output_class_templates();
 &output_index_template();
 &output_aux_templates();
 &output_tree_template();
+&_log('Completed generating documentation');
 
 # 
 # End main execution
 #
 
+
+#
+# Output a single template
+#
+sub output_template {
+   my ($tmplname, $outname, $params, $relaxed) = (@_);
+  
+   # Caching templates seems to improve performance quite a lot
+   if (!$TMPL_CACHE{$tmplname}){
+      $TMPL_CACHE{$tmplname} = new HTML::Template( 
+         die_on_bad_params    => !$relaxed, 
+         filename             => $tmplname);
+   }
+   my $tmpl = $TMPL_CACHE{$tmplname};
+   $tmpl->param($params);
+   open FILE, ">$OPTIONS{OUTPUT}$outname"
+      or die "Couldn't open '$outname' to write : $!\n";
+   print FILE $tmpl->output;
+   close FILE;
+}
+
 #
 # Gather information for each class and output its template
 #
 sub output_class_templates {
-   
+  
    # Note the class name for later
    @CLASSNAMES = sort { $a->{classname} cmp $b->{classname}} 
       map {classname => $_}, keys %$CLASSES;
 
+   my %fnames = map { 
+      ($$CLASSES{$_}->{constructor_vars}->{filename} or '') => 1  
+   } keys %$CLASSES; 
+   
+   @FILENAMES = map {filename => $_}, 
+      sort {uc($a) cmp uc($b)} grep {length $_} keys %fnames;
+
    for (my $i = 0; $i < @CLASSNAMES; $i++){
       my $classname = $CLASSNAMES[$i]->{classname};
-      
+
       # Template Parameters
       my ($class, $subclasses, $class_summary, @constructor_params, 
-         $next_class, $prev_class);
+         $next_class, $prev_class, $constructor_attrs);
 
       $class= $$CLASSES{$classname};
 
@@ -90,7 +118,11 @@ sub output_class_templates {
 
       # Set up the constructor and class information
       &resolve_synonyms($class->{constructor_vars});
-      @constructor_params = &fetch_args($class->{constructor_vars}, $class->{constructor_args});
+      &format_vars($class->{constructor_vars});
+      @constructor_params = 
+         &fetch_args($class->{constructor_vars}, \$class->{constructor_args});
+      $constructor_attrs = 
+         &format_method_attributes($class->{constructor_vars});
       $class_summary = &resolve_inner_links($class->{constructor_summary});
       $class_summary =~ s/TODO:/<br><b>TODO:<\/b>/g if $class_summary;
       $class_summary .= &format_class_attributes($class->{constructor_vars});
@@ -104,26 +136,30 @@ sub output_class_templates {
       $subclasses = join( ',',
          map qq| <a href="$_.html">$_</a>|, @{&find_subclasses($classname)});
       
-      # Set up the template and output it
-      $TMPL->param(next_class => $next_class);
-      $TMPL->param(prev_class => $prev_class);
-      $TMPL->param(superclass => $class->{extends});
-      $TMPL->param(constructor_args => $class->{constructor_args});
-      $TMPL->param(constructor_params => \@constructor_params);
-      $TMPL->param(class_summary => $class_summary);
-      $TMPL->param(classname => $classname);
-      $TMPL->param(subclasses=> $subclasses);
-      $TMPL->param(class_tree => &build_class_tree($classname, $CLASSES));
-      $TMPL->param(fields => &map_fields($class));
-      $TMPL->param(methods => &map_methods($class)); 
-      $TMPL->param(method_inheritance => &map_method_inheritance($class));
-      $TMPL->param(field_inheritance => &map_field_inheritance($class));
-      $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-      $TMPL->param(page_footer => $OPTIONS{PAGE_FOOTER});
-      open FILE, '>' . $OPTIONS{OUTPUT} . "$classname.html"
-         or die "Couldn't open file to write : $!\n";
-      print FILE $TMPL->output;
-      close FILE;
+      &output_template(MAIN_TMPL, "$classname.html", 
+         {
+            next_class           => $next_class,
+            prev_class           => $prev_class,
+            superclass           => $class->{extends},
+            constructor_args     => $class->{constructor_args},
+            constructor_params   => \@constructor_params,
+            constructor_attrs    => $constructor_attrs,
+            constructor_returns  => 
+               ref($class->{constructor_vars}->{returns}[0]) eq 'ARRAY' ? 
+                  $class->{constructor_vars}->{returns}[0][0] : 
+                  $class->{constructor_vars}->{returns}[0],
+            class_summary        => $class_summary,
+            classname            => $classname,
+            subclasses           => $subclasses,
+            class_tree           => &build_class_tree($classname, $CLASSES),
+            fields               => &map_fields($class),
+            methods              => &map_methods($class), 
+            method_inheritance   => &map_method_inheritance($class),
+            field_inheritance    => &map_field_inheritance($class),
+            inner_classes        => $class->{inner_classes},
+            project_name         => $OPTIONS{PROJECT_NAME},
+            page_footer          => $OPTIONS{PAGE_FOOTER},
+      }, 1);
    }
 }
 
@@ -151,59 +187,63 @@ sub output_aux_templates(){
       }
    }
 
-   $TMPL = new HTML::Template( die_on_bad_params => 1, 
-      filename => ALLCLASSES_TMPL);
    $DEFAULT_CLASSNAME = $CLASSNAMES[0]->{classname};
-   $TMPL->param(CLASSNAMES => \@CLASSNAMES);
-   $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(logo => basename($OPTIONS{LOGO}));
-   open FILE, ">$OPTIONS{OUTPUT}allclasses-frame.html"
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
-
-   $TMPL = new HTML::Template( die_on_bad_params => 1, 
-      filename => ALLCLASSES_NOFRAME_TMPL);
-   $DEFAULT_CLASSNAME = $CLASSNAMES[0]->{classname};
-   $TMPL->param(CLASSNAMES => \@CLASSNAMES);
-   $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(logo => basename($OPTIONS{LOGO}));
-   open FILE, ">$OPTIONS{OUTPUT}allclasses-noframe.html"
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
-
-
-   $TMPL = new HTML::Template( die_on_bad_params => 1, filename => INDEX_TMPL);
-   if ($summary){
-      $TMPL->param(DEFAULT_CLASSNAME => "overview-summary");
-   } else {
-      $TMPL->param(DEFAULT_CLASSNAME => $DEFAULT_CLASSNAME);
+   
+   my $params = {    
+      filename    => 'All Classes',
+      CLASSNAMES  => \@CLASSNAMES };
+   if (@FILENAMES < 2){
+      $params->{project_name} = $OPTIONS{PROJECT_NAME};
+      $params->{logo} = basename($OPTIONS{LOGO});
    }
-   open FILE, ">$OPTIONS{OUTPUT}index.html"
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
+   &output_template(ALLCLASSES_TMPL, 'allclasses-frame.html', $params);
 
-   $TMPL = new HTML::Template( die_on_bad_params => 1, filename => HELP_TMPL);
-   $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(page_footer => $OPTIONS{PAGE_FOOTER});
-   open FILE, ">$OPTIONS{OUTPUT}help-doc.html"
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
+   &output_template(ALLCLASSES_NOFRAME_TMPL, 'allclasses-noframe.html',
+      {  CLASSNAMES     => \@CLASSNAMES,
+         project_name   => $OPTIONS{PROJECT_NAME},
+         logo           => basename($OPTIONS{LOGO}) 
+      });
+
+   if (@FILENAMES > 1){
+
+      &output_template(OVERVIEW_FRAME_TMPL, 'overview-frame.html',
+         {  logo           => basename($OPTIONS{LOGO}),
+            project_name   => $OPTIONS{PROJECT_NAME},
+            filenames      => \@FILENAMES
+         });
+
+      for my $fname (map { $_->{filename}} @FILENAMES){
+         my @classes = 
+            grep {
+               ($$CLASSES{$_}->{constructor_vars}->{filename} || '')  eq $fname
+            } keys %$CLASSES;
+     
+         &output_template(ALLCLASSES_TMPL, "overview-$fname.html",
+            {  filename    => $fname, 
+               CLASSNAMES  => [map {classname => $_}, sort @classes]
+            }); 
+
+      }
+   }
+   
+   # Output the main index template
+   &output_template(INDEX_TMPL, 'index.html', 
+      {  DEFAULT_CLASSNAME => 
+            ($summary ? 'overview-summary' : $DEFAULT_CLASSNAME),
+         multifile => @FILENAMES > 1
+      });
+
+   # Output the help document template
+   &output_template(HELP_TMPL, 'help-doc.html',  
+      { page_footer => $OPTIONS{PAGE_FOOTER}, 
+         project_name => $OPTIONS{PROJECT_NAME} });
+   
    copy (LOCATION . STYLESHEET, $OPTIONS{OUTPUT} . STYLESHEET);
 
-   $TMPL = new HTML::Template( die_on_bad_params => 1, 
-      filename => OVERVIEW_TMPL);
-   $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(page_footer => $OPTIONS{PAGE_FOOTER});
-   $TMPL->param(project_summary => $summary);
-   open FILE, ">$OPTIONS{OUTPUT}overview-summary.html"
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
-
+   &output_template(OVERVIEW_TMPL, 'overview-summary.html',
+      {  project_name      => $OPTIONS{PROJECT_NAME},
+         page_footer       => $OPTIONS{PAGE_FOOTER},
+         project_summary   => $summary });
 }
 
 
@@ -249,8 +289,9 @@ sub show_usage(){
    
    -h | --help          Show this message and exit
    -r | --recursive     Recurse through given directories
-   -p | --private       Show private methods
+   -p | --private       Show private methods and fields
    -d | --directory     Specify output directory (defaults to js_docs_out)
+   -q | --quiet         Suppress normal output 
 
 
    --page-footer        Specify (html) footer string that will be added to 
@@ -258,7 +299,11 @@ sub show_usage(){
    --project-name       Specify project name for that will be added to docs 
    --logo               Specify a path to a logo to be used in the docs 
    --project-summary    Specify a path to a text file that contains an 
-                        overview summary of the project \n};
+                        overview summary of the project 
+                        
+   --globals-name       Specify a 'class name' under which all unattached
+                        methods will be classified. The defaults to GLOBALS
+                        \n};
 
 }
 
@@ -282,9 +327,10 @@ sub load_sources(){
       }   
    }
    for (@filenames){
-      print "Loading sources from $_\n";
+      &_log("Loading sources from $_");
       open SRC, "<$_" or  (warn "Can't open $_, skipping: $!\n" and next);
       local $/ = undef;
+      push @sources, (fileparse($_))[0];
       push @sources, \<SRC>;
       close SRC;
    }
@@ -340,7 +386,9 @@ sub map_methods{
          next if (!$OPTIONS{PRIVATE} && $method->{vars}->{private});
          $method->{vars}->{returns}[0] = 
             $method->{vars}->{returns}[0] || $method->{vars}->{return};
-         my @args = &fetch_args($method->{vars}, $method->{argument_list});
+         my @args = &fetch_args($method->{vars}, \$method->{argument_list});
+         @args = map { &format_vars($_); $_ } @args; 
+         &format_vars($method->{vars});
          push @methods, {
             method_description => &resolve_inner_links($method->{description}),
             method_summary => &resolve_inner_links(
@@ -359,7 +407,9 @@ sub map_methods{
       @{$class->{class_methods}}){
          &resolve_synonyms($method->{vars}); 
          next if (!$OPTIONS{PRIVATE} && $method->{vars}->{private});
-         my @args = &fetch_args($method->{vars}, $method->{argument_list});
+         my @args = &fetch_args($method->{vars}, \$method->{argument_list});
+         @args = map { &format_vars($_); $_ } @args; 
+         &format_vars($method->{vars});
          push @methods, {
             method_description => &resolve_inner_links($method->{description}),
             method_summary => &resolve_inner_links(
@@ -383,7 +433,7 @@ sub map_methods{
 sub map_return_type {
    my ($method) = @_;
    if ($method->{vars}->{type}[0]){
-      my ($name) = $method->{vars}->{type}[0] =~ /(\w+)/;
+      my ($name) = $method->{vars}->{type}[0] =~ /(\w+(?:\.\w+)*)/;
       if ($$CLASSES{$name}){
          return qq|<a href="$name.html">$name</a>|;
       }
@@ -445,7 +495,7 @@ sub map_fields {
 sub map_field_type {
    my ($field) = @_;
    if ($field->{field_vars}->{type}[0]){
-      my ($name) = $field->{field_vars}->{type}[0] =~ /(\w+)/;
+      my ($name) = $field->{field_vars}->{type}[0] =~ /(\w+(?:\.\w+)*)/;
       if ($$CLASSES{$name}){
          return qq|<a href="$name.html">$name</a>|;
       }
@@ -625,21 +675,15 @@ sub output_index_template {
    }
    
    my $letter_list = [map {letter_name => $_}, sort {$a cmp $b} keys %letters];
-   $TMPL = 
-      new HTML::Template( die_on_bad_params => 1, filename => INDEX_ALL_TMPL);
-   $TMPL->param( letters => $letter_list);
-   $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(page_footer => $OPTIONS{PAGE_FOOTER});
-   $TMPL->param(index_list => [
-      map {
-         letter => $_->{letter_name}, 
-         value => $letters{$_->{letter_name}}
-      }, @{$letter_list}]);
-   
-   open FILE, '>' . $OPTIONS{OUTPUT} . '/index-all.html'
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
+   &output_template(INDEX_ALL_TMPL, 'index-all.html', 
+      {  letters        => $letter_list,
+         project_name   => $OPTIONS{PROJECT_NAME},
+         page_footer    => $OPTIONS{PAGE_FOOTER},
+         index_list     => [map {
+                              letter => $_->{letter_name}, 
+                              value => $letters{$_->{letter_name}}
+                           }, @{$letter_list}]
+      });
 }
 
 #
@@ -651,7 +695,7 @@ sub build_tree
    my $ret = "";
    for my $cname (map {$_->{classname}} @CLASSNAMES) 
    {
-      next if $cname eq '[default context]';
+      next if $cname eq $OPTIONS{GLOBALS_NAME};
       my $class = $$CLASSES{$cname};
       my $parent = $class->{extends} || '-';
       if (!($parentclassname || $class->{extends}) 
@@ -674,17 +718,12 @@ sub build_tree
 # Outputs the overview tree
 #
 sub output_tree_template {
-   $TMPL = new HTML::Template( 
-      die_on_bad_params => 0, 
-      filename => TREE_TMPL);
    my $tree = &build_tree();
-   $TMPL->param(classtrees => $tree);
-   $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(page_footer => $OPTIONS{PAGE_FOOTER});
-   open FILE, '>' . $OPTIONS{OUTPUT} . "overview-tree.html"
-      or die "Couldn't open file to write : $!\n";
-   print FILE $TMPL->output;
-   close FILE;
+   &output_template(TREE_TMPL, 'overview-tree.html',
+      {  classtrees     => $tree,
+         project_name   => $OPTIONS{PROJECT_NAME},
+         page_footer    => $OPTIONS{PAGE_FOOTER}
+      }, 1);
 }
 
 #
@@ -707,7 +746,7 @@ sub format_method_attributes {
 #
 sub format_class_attributes {
    my ($attrs) = shift;
-   my $attributes = '<br/>';
+   my $attributes = '<BR/><BR/>';
    while (my ($name, $val) = each %{$attrs}) {
       $attributes .= &{$CLASS_ATTRS_MAP{$name}}($val) 
          if $CLASS_ATTRS_MAP{$name};
@@ -725,6 +764,7 @@ sub parse_cmdline {
    $OPTIONS{COPYRIGHT} = '';
    $OPTIONS{PROJECT_SUMMARY} = '';
    $OPTIONS{LOGO} = '';
+   $OPTIONS{GLOBALS_NAME} = 'GLOBALS';
    GetOptions(
       'private|p'          => \$OPTIONS{PRIVATE},
       'directory|d=s'      => \$OPTIONS{OUTPUT},
@@ -733,7 +773,9 @@ sub parse_cmdline {
       'page-footer=s'      => \$OPTIONS{PAGE_FOOTER},
       'project-name=s'     => \$OPTIONS{PROJECT_NAME},
       'project-summary=s'  => \$OPTIONS{PROJECT_SUMMARY},
-      'logo=s'             => \$OPTIONS{LOGO}
+      'logo=s'             => \$OPTIONS{LOGO},
+      'globals-name=s'     => \$OPTIONS{GLOBALS_NAME},
+      'quiet|q'            => \$OPTIONS{QUIET}
    );
    $OPTIONS{OUTPUT} =~ s/([^\/])$/$1\//;
 }
@@ -752,20 +794,44 @@ sub resolve_inner_links {
 #
 sub format_link {
    my ($link) = shift;
-   $link =~ s/\s*(\S+)\s*/$1/;
-   $link =~ s/<[^>]*>//g;
-   my ($class, $method) = $link =~ /(\w+)?(?:#(\w+))?/;
+   $link =~ s/\s*(.*?)\s*/$1/;
+   $link =~ s/<[^>]*>//g; 
+   my ($class, $method, $label) = 
+      $link =~ /^([^\s#]+)?(?:#(\w+(?:\.\w+)*))?\s*(.*)$/
+         or return $link;
+   if ($class){
+      unless ($$CLASSES{$class}){
+         warn "\@link can't find reference $class\n";
+         return $link;
+      }
+   }
    if (!$method){
-      "<a href=\"$class.html#\">$class<\/a>";
+      $label = $class unless $label;
+      "<a href=\"$class.html#\">$label<\/a>";
    } else {
       if ($class){
-         "<a href=\"$class.html#$method\">$class.$method()</a>";
-      }
-      else {
-         "<a href=\"#$method\">$method()</a>";
+         my $ismethod = grep { 
+               $_->{mapped_name} eq $method 
+            } (@{$CLASSES->{$class}->{instance_methods}},
+                  @{$CLASSES->{$class}->{class_methods}});
+         my $isfield = grep {
+               $_->{field_name} eq $method
+            } (@{$CLASSES->{$class}->{instance_fields}},
+                  @{$CLASSES->{$class}->{class_fields}}) unless $ismethod;
+         $label = "$class.$method" . ($ismethod ? '()' : '') unless $label;
+         if ($ismethod or $isfield){
+            "<a href=\"$class.html#$method\">$label</a>";
+         } else {
+            warn "\@link can't find reference $method in $class\n";
+            $link;
+         }
+      } else {
+         $label = "$method()" unless $label;
+         "<a href=\"#$method\">$label</a>";
       }
    }
 }
+
 
 #
 # Initializes the customizable maps for @attributes
@@ -774,50 +840,47 @@ sub initialize_param_maps {
    %CLASS_ATTRS_MAP  = (
       author =>
          sub {
-            '<DT><B>Author:</B>' .
-               join(',', @{$_[0]}) . '<P/>'
+            '<B>Author:</B> ' .
+               join(', ', @{$_[0]}) . "<BR/>" 
          },
-
       deprecated =>
          sub {
-            '<DT><B>Deprecated.</B><I>' . ($_[0] ? $_[0]->[0] : '') . 
-            '</I><P/>';
+            '<B>Deprecated</B> <I>' . ($_[0] ? $_[0]->[0] : '') . 
+            "</I><BR/><BR/>";
          },
       see =>
          sub {
-            '<DT><B>See:</B><DD>- ' .
-            join('</DD><DD>- ', map {&format_link($_)} @{$_[0]}) . "</DD><P/>"
+            '<B>See:</B><UL>- ' .
+            join('<BR/>- ', map {&format_link($_)} @{$_[0]}) . "</UL>"
          },
       version =>
          sub {
-            '<DT><B>Version: </B>' .
-               join(',', @{$_[0]}) . '<P/>'
+            '<B>Version: </B>' .
+               join(', ', @{$_[0]}) . '<BR/><BR/>' 
          },
       requires =>
          sub {
-            '<DT><B>Requires:</B><DD>- ' .
-            join('</DD><DD>- ', map {&format_link($_)} @{$_[0]}) . "</DD><P/>"
+            '<B>Requires:</B><UL>- ' .
+            join('<BR/>- ', map {&format_link($_)} @{$_[0]}) . "</UL>"
+         },
+      filename =>
+         sub {
+            "<I>Defined in $_[0]</I><BR/><BR/>";
          }
    );
    
    %METHOD_ATTRS_MAP = (
       throws => 
          sub { 
-         '<DT><DT><B>Throws:</B><DD>- ' .  
-         join('<DD>- ', @{$_[0]}) . '<P/>'
+         "<B>Throws:</B><UL>- " .  
+         join("<BR>- ", @{$_[0]}) . "</UL>"
       },
-      deprecated =>
-         sub {
-            '<DT><B>Deprecated.</B><I>' . ($_[0] ? $_[0]->[0] : '') . 
-            '</I><P/>';
-         },
-      see =>
-         sub {
-            '<DT><B>See:</B><DD>- ' .
-            join('</DD><DD>- ', map {&format_link($_)} @{$_[0]}) . "</DD><P/>"
-         }
    );
    $METHOD_ATTRS_MAP{exception} = $METHOD_ATTRS_MAP{throws};
+   $METHOD_ATTRS_MAP{author} = $CLASS_ATTRS_MAP{author};
+   $METHOD_ATTRS_MAP{deprecated} = $CLASS_ATTRS_MAP{deprecated};
+   $METHOD_ATTRS_MAP{see} = $CLASS_ATTRS_MAP{see};
+   $METHOD_ATTRS_MAP{requires} = $CLASS_ATTRS_MAP{requires};
 }
 
 
@@ -826,21 +889,26 @@ sub initialize_param_maps {
 # return the list of them
 #
 sub fetch_args {
-   my ($vars, $arg_list) = @_;
-   return unless $vars and $arg_list;
+   my ($vars, $arg_list_ref) = @_;
+   return unless $vars and $$arg_list_ref;
    my (@args, %used);
-   for my $arg (split /\W+/, ($arg_list =~ /\(([^)]*)/)[0]){
+   for my $arg (split /\W+/, ($$arg_list_ref =~ /\(([^)]*)/)[0]){
       for (@{$vars->{param}}){
-         my ($name, $value) = (/(\w+)(.*)/)[0, 1];
+         my ($type, $name, $value) = /(?:\{(\w+(?:\.\w+)*)\})?\s*(\w+)(.*)/;
          next unless $name eq $arg;
          $used{$name} = 1;
-         push @args, {varname => $name, vardescrip => $value};
+         #push @args, { varname => $name, vardescrip => $value};
+         $type ||= '';
+         $type =  qq|<a href="$type.html">$type</a>| if $$CLASSES{$type};
+         my $type_regex = qr{\b$arg\b};
+         $$arg_list_ref =~ s/($type_regex)/&lt;$type&gt; $1/ if $type;
+         push @args, { varname => $name, vardescrip => $value};
       }
    }
    for (@{$vars->{param}}){
-      my ($name, $value) = (/(\w+)(.*)/)[0, 1];
+      my ($type, $name, $value) = /(?:\{(\w+(?:\.\w+)*)\})?\s*(\w+)(.*)/;
       next if $used{$name};
-      push @args, {varname => $name, vardescrip => $value};
+      push @args, { varname => $name, vardescrip => $value };
    }
    @args;
 }
@@ -850,4 +918,27 @@ sub resolve_synonyms {
    $item->{param} = $item->{param} || $item->{argument};
    $item->{returns} = $item->{return} || $item->{returns};
    $item->{final} = $item->{final} || $item->{const};
+}
+
+#
+# Log a message to STDOUT if the --quiet switch is not used
+#
+sub _log {
+   print $_[0], "\n" unless $OPTIONS{QUIET};
+}
+
+#
+# Takes a vars hash and resolves {@link}s within it
+#
+sub format_vars {
+   my ($vars) = @_;
+   for my $key (keys %$vars){
+      if (ref($vars->{$key}) eq 'ARRAY'){
+         for (0..$#{$vars->{$key}}){
+            $vars->{$key}->[$_] = &resolve_inner_links($vars->{$key}->[$_]);
+         }
+      } else {
+         $vars->{$key} = &resolve_inner_links($vars->{$key});   
+      }
+   }
 }

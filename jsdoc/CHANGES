@@ -1,3 +1,132 @@
+JSDoc 1.7.1.2
+=============
+
+- Fixed problems with new preprocessor when confronted with nested classes
+
+JSDoc 1.7.1.1
+=============
+
+- Fixed bug where {@link}s inside of @params weren't processed
+
+JSDoc 1.7.1
+===========
+
+- Added --quiet switch and message to signify ending of successful execution
+
+- Fixed problem with perl segfaulting on big class prototype block definitions
+
+- Fixed incorrectly formatted {@link}s nested in other @attributes
+
+- Added preprocessor for handling private methods to replace bulky
+  and buggy evaluate_constructor method
+
+JSDoc 1.7
+=========
+
+- Added usage of strict and warnings in JSDoc.pm
+
+- Added ability to set type information for method parameters
+  (e.g. /** @param {String} userName The name of the current user */ )
+
+- Added support for class prototype initialization blocks (finally!)
+
+JSDoc 1.6.3.1
+=============
+
+- Fixed bug where static fields initialized to 0 are not picked up
+
+JSDoc 1.6.3
+===========
+
+- Removed the constraint that a nested class constructor must be marked
+  with the @constructor attribute
+
+- Allow @constructor attribute to mark nested class constructors which would
+  otherwise be considered static methods
+
+- Allow newlines as well as semi-colon for line-endings
+
+- Allow a leading '$' for field names
+
+
+JSDoc 1.6.2.1
+=============
+
+- Fixed splicing error for nested classes, thanks again to jdber 
+
+
+JSDoc 1.6.2
+===========
+
+- Carry over overridden method description attributes even if there is
+  no text description to carry over
+
+- Improved HTML in main.tmpl 
+
+- Fixed infinite loop and recognition for when static inner class construct is 
+  used (thanks to jdber for the patch)
+
+- Added a Nested Class Summary section to the output documentation to display
+  inner classes
+
+JSDoc 1.6.1.1
+=============
+
+- Fixed bug in carrying over description of overridden methods
+
+JSDoc 1.6.1
+===========
+
+- Improved the format_link function in jsdoc.pl so that {@links} will
+  not be made to non-existent resources, and parentheses are not placed
+  after a field name (as opposed to a method name)
+
+- Carry over method documentation for overridden methods if no new 
+  documentation has been supplied for the method. This is in following with
+  javadoc functionality
+
+- Fixed /* functionality(whatever) bug
+
+- Fixed remaining problems with comments inside of parameter lists
+
+JSDoc 1.6
+=========
+
+- Big cleanup in jsdoc.pl in terms of writing templates to file
+
+- Fixed bug where multi-line @params don't work
+
+- Added filename-scoped frame, as well as the name of the filename for
+  each class
+
+- Improved the linking implementation for @link and @see to do a better job
+  in terms of not building broken links
+
+JSDoc 1.5.2
+===========
+
+- Changed the name '[default context]' for non-class functions to be
+  GLOBALS, also made this name configurable with command-line parameters
+
+- Made jsdoc easily runnable from anywhere on the filesystem, without 
+  requiring installing JSDoc.pm in the @INC
+
+JSDoc 1.5.1
+===========
+
+- Added support for @requires in methods
+
+- Generic '@' attributes now work for constructors, such as @see and @throws.
+  Also added support for @return and @returns for constructors
+
+- Fixed the @link construct to allow custom labels
+
+- Added standard support for @author in methods as well as classes
+  (Thanks for Rainer Eschen for bringing me to my senses)
+
+- Fixed spacing for @author attributes
+
+
 JSDoc 1.5
 ===========
 

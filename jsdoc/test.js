@@ -15,6 +15,9 @@
  * really existing in JavaScript
  * TODO: This is an example todo message
  * @constructor
+ * @throws MemoryException if there is no more memory 
+ * @throws GeneralShapeException rarely (if ever)
+ * @return A new shape
  */
 function Shape(){
   
@@ -45,6 +48,8 @@ function Shape(){
  * This is an unattached function 
  * @param One one
  * @param Two two
+ * @author Gabriel Reid
+ * @deprecated So you shouldn't use it anymore!
  */
 function UnattachedFunction(One, Two){
    return "";
@@ -80,7 +85,7 @@ Shape.prototype.setColor = Shape_SetColor;
 /**
  * Get the coordinates of this shape. It is assumed that we're always talking
  * about shapes in a 2D location here.
- *
+ * @requires Shape The shape class
  * @returns A Coordinate object representing the location of this Shape
  */
 function Shape_GetCoords(){
@@ -128,6 +133,8 @@ Shape.prototype.clone = function(){
  * This class could be considered a concrete implementation class
  * @param width The optional width for this Rectangle
  * @param height Thie optional height for this Rectangle
+ * @author Gabriel Reid
+ * @see Shape Shape is the base class for this
  */
 function Rectangle(width, // This is the width 
                   height // This is the height
@@ -188,13 +195,17 @@ function Rectangle_GetWidth(){
 }
 
 /**
- * Get the value of the height for the Rectangle
+ * Get the value of the height for the Rectangle.
+ * Another getter is the {@link Shape#getColor} method in the 
+ * {@link Shape base Shape class}.  
  */
 function Rectangle_GetHeight(){
 }
 
 /**
- * Set the width value for this Rectangle
+ * Set the width value for this Rectangle.
+ * This is a link to an {@link GLOBALS#UnattachedFunction 
+ * unattached function}.
  * @param width The width value to be set
  */
 function Rectangle_SetWidth(width){
@@ -374,3 +385,36 @@ function Coordinate_SetX(x){
 function Coordinate_SetY(y){
    this.y = y;
 }
+
+/**
+ * This class exists to demonstrate the assignment of a class prototype
+ * as an anonymous block
+ */
+function ShapeFactory(){
+}
+
+ShapeFactory.prototype = {
+   /** Create a shape */
+   createShape: function(){
+      return new Shape();
+   }
+}
+
+
+/** This is the Foo class
+ @constructor */
+function Foo(){}
+
+/** @constructor */
+function Bar(){}
+
+/** 
+ * Nested class
+ *  @constructor 
+ */
+Foo.Bar = function(){this.x = 2;}
+
+Foo.Bar.prototype = new Bar();
+
+Foo.Bar.prototype.y = '3';
+
