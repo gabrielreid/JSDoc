@@ -115,6 +115,8 @@ require 5.000;
 use Carp;
 use Exporter;
 
+use Data::Dumper;
+
 @ISA = qw(Exporter);
 @EXPORT = qw(parse_jsdoc_source parse_code_tree);
 
@@ -144,7 +146,7 @@ sub parse_jsdoc_source {
 
         # grab the contents of a doc-comment and the line of code that follows
         my ($doc, $code) = ($1, $2);
-        
+
         # trim leading whitespace and asterisks from doc-comment
         $doc =~ s/^[\t \*]*//gm;
         
@@ -173,7 +175,7 @@ sub parse_jsdoc_source {
 
 sub parse_jsdoc_comment {
     my $doc = shift;
-    
+
     # remember each part that is parsed
     my %parsed = ();
     
@@ -215,6 +217,9 @@ sub parse_code_tree {
    # perlify os line-endings
    $js_src =~ s/(\r\n|\r)/\n/g;
 
+   # clear out all big block comments without related code
+   $js_src =~ s/\/\*\*([^\/]|([^*]\/))*\*\/\s*\n\s*\n//sg;
+
    &fetch_funcs_and_classes($js_src);
 
    &map_all_properties();
@@ -238,40 +243,41 @@ sub parse_code_tree {
 # PARAM: The document string to be parsed
 #
 sub parse_jsdoc_comment2 {
-    my $doc = shift;
+   my $doc = shift;
+  
+   $doc =~ s/^\s*\*//gm;
+
+   # remember each part that is parsed
+   my %parsed = ();
+   
+   # the first paragraph could be a summary statement
+   # a paragraph may follow of variable defs (variable names start with "@")
+   my ($summary, $variable_str) = $doc =~ /^\s*(.*?)\s*(@.*)?$/gxs;
+
+   $parsed{summary} = $summary;
 
 
-      $doc =~ s/^[\t \*]*//gm;
-    # remember each part that is parsed
-    my %parsed = ();
-    
-    # the first paragraph could be a summary statement
-    # a paragraph may follow of variable defs (variable names start with "@")
-    my ($summary, $variable_str) = $doc =~ /^\s*(.*?)\s*(@.*)?$/gxs;
-    
-    $parsed{summary} = $summary;
-
-
-    # two types of variable def can be dealt with here:
-    # a @argument has a two-part value -- the arg name and a description
-    # all other @<variables> only have a single value each (although there may
-    # be many variables with the same name)
-    if($variable_str) {
-        my %args = ();
-        my %vars = ();
-        while ($variable_str =~ m!(?:^|\s*\n)(?:\@param|\@argument)\s+(\w+)\s+(\S.*?)(?=\n\n|\n@|$)!gs) {
-            $args{$1} = $2;
-        }
-        $parsed{args} = \%args;
-        while ($variable_str =~ /\@(\w+)(.*)/gs) {
-            next if $1 eq 'param';
-            $vars{$1} = [] unless defined $vars{$1};
-            push(@{$vars{$1}}, $2);
-        }
-        $parsed{vars} = \%vars;
-    }
-    
-    return \%parsed;
+   # two types of variable def can be dealt with here:
+   # a @argument has a two-part value -- the arg name and a description
+   # all other @<variables> only have a single value each (although there may
+   # be many variables with the same name)
+   if($variable_str) {
+       my %args = ();
+       my %vars = ();
+       while ($variable_str =~ /\@(?:param|argument)\s+(\w+)\s+([^\@]*)/gs) {
+          $args{$1} = $2;
+       }
+       $parsed{args} = \%args;
+       while ($variable_str =~ /\@(\w+)([^\@]*)/gs) {
+           my ($name, $val) = ($1, $2);
+           next if $name eq 'param' || $name eq 'argument';
+           $name =~ s/^return$/returns/; # Allow returns and return to be used
+           $vars{$name} = [] unless defined $vars{$name};
+           push(@{$vars{$name}}, $val);
+       }
+       $parsed{vars} = \%vars;
+   }
+   return \%parsed;
 }
 
 #
@@ -280,7 +286,7 @@ sub parse_jsdoc_comment2 {
 #
 sub fetch_funcs_and_classes {
    my $js_src = shift;
-
+    
    while ($js_src =~ m!
          (?:/\*\*(.*?)\*/\s*\n\s*)?                   # Documentation
          (?:(?:function\s*(\w+)\s*(\(.*?\))\s*\{)|         # Function
@@ -400,6 +406,8 @@ sub add_function {
       $function_ref->{returns} = 
          $function_ref->{documentation}->{vars}->{returns}->[0];
    } 
+   $function_ref->{vars} = $function_ref->{documentation}->{vars};
+
 }
 
 
@@ -462,6 +470,8 @@ sub map_single_property {
    $method{description} = $function->{description};
    $method{args} = $function->{args};
    $method{returns} = $function->{returns};
+   $method{vars} = $function->{vars};
+   delete $method{vars}->{returns};
    $method{is_private} = $function->{is_private} ? 1 : 0;
    if (!$is_class_prop){
       push @{$CLASSES{$class}->{instance_methods}}, \%method;
@@ -571,6 +581,7 @@ sub set_class_constructors {
          $constructor->{argument_list};
       $CLASSES{$classname}->{constructor_summary} = $constructor->{description};
       $CLASSES{$classname}->{constructor_params} = $constructor->{args};
+      $CLASSES{$classname}->{constructor_vars} = $constructor->{vars} || {};
    }
 }
 
@@ -588,8 +599,13 @@ sub evaluate_constructor {
       $func_def .= "$&" if $braces == 0;
       $braces += ($1 eq '{' ? 1 : -1 );
    }
+   
+   # Get rid of the documentation
+   ($func_def =~ s/(\/\*\*.*?\*\/)//s) && ($doc = $1);
    $func_def =~ s/this/$classname.prototype/g;
    $func_def =~ s/function\s+(\w+)/$classname.prototype.__________$1 = function/g;
+   # And then add it back on
+   $doc and ($func_def = $doc . $func_def);
    &fetch_funcs_and_classes($func_def);
    return $post;
 }
