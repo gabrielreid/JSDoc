@@ -281,18 +281,10 @@ sub parse_jsdoc_comment2 {
 sub fetch_funcs_and_classes {
    my $js_src = shift;
 
-   # Get rid of all code blocks for parsing
-   my $orig_src = $js_src;
-   $js_src =~ s/\{([^\{\}]*?)\}//gs;
-   while ($orig_src ne $js_src){
-      $orig_src = $js_src;
-      $js_src =~ s/\{([^\{\}]*?)\}//gs;
-   }
-  
    while ($js_src =~ m!
-         (?:/\*\*(.*?)\*/\s*\n\s*)?                   # Function documentation
-         (?:(?:function\s*(\w+)\s*(\(.*?\)))|         # Function
-         (?:(\w+)(\.prototype)?\.(\w+)\s*=\s*function\s*(\(.*?\)))| # Anonymous method
+         (?:/\*\*(.*?)\*/\s*\n\s*)?                   # Documentation
+         (?:(?:function\s*(\w+)\s*(\(.*?\))\s*\{)|         # Function
+         (?:(\w+)(\.prototype)?\.(\w+)\s*=\s*function\s*(\(.*?\)))| # Anonymous function 
          (?:(\w+)\.prototype\.(\w+)\s*=\s*(.*?);)|    # Instance property 
          (?:(\w+)\.prototype\s*=\s*new\s*(\w+)\(.*?\)\s*;)| #Inheritance
          (?:(\w+)\.(\w+)\s*=\s*(.*?);))        # Class property
@@ -302,15 +294,20 @@ sub fetch_funcs_and_classes {
       $doc = $1 or $doc = "";
 
       if ($2){
-         &add_function($doc, $2, $3);
-      } elsif ($4 && $6){
+         my ($func, $arglist, $post) = ($2, $3, $');
+         &add_function($doc, $func, $arglist);
+         if ($doc =~ /\@constructor/){
+            &evaluate_constructor($doc, $func, $arglist, $post);
+         }
+      } elsif ($4 && $6 && $FUNCTIONS{$4}){
          &add_anonymous_function($doc, $4, $6, $7, not defined($5));
       } elsif ($8 && $9 && defined($10)) {
          &add_property($doc, $8, $9, $10, 0);
       } elsif ($11 && $12){
          &set_base_class($11, $12);
-      } elsif ($13 && $14 && $15 && $14 ne 'prototype' && $13 ne 'this'){
-         &add_property($doc, $13, $14, $15, 1);
+      } elsif ($13 && $14 && $15 && $14 ne 'prototype' 
+         && $13 ne 'this' && $FUNCTIONS{$13}){
+            &add_property($doc, $13, $14, $15, 1);
       }
    }
 }
@@ -424,6 +421,14 @@ sub map_all_properties {
          &map_single_property ($class, $prop_name, $prop_val, $description, 0);
       }
    }
+
+   # Map all the unattached functions
+   my $classname = '[default context]';
+   &add_class($classname);
+   for my $function (grep !($FUNCTIONS{$_}->{is_mapped} || $CLASSES{$_}), 
+      keys %FUNCTIONS){
+         &map_single_property($classname, $function, $function, '', 1);
+   }
 }
 
 #
@@ -448,6 +453,7 @@ sub map_single_property {
    }
    my %method;
    my $function = $FUNCTIONS{$prop_val};
+   $function->{is_mapped} = 1;
    $method{mapped_name} = $prop_name;
    $method{argument_list} = $function->{argument_list}; 
    $method{description} = $function->{description};
@@ -562,6 +568,23 @@ sub set_class_constructors {
       $CLASSES{$classname}->{constructor_summary} = $constructor->{description};
       $CLASSES{$classname}->{constructor_params} = $constructor->{args};
    }
+}
+
+#
+# Handles a function that has been denoted as a constructor by looking for
+# inner functions and properties
+#
+sub evaluate_constructor {
+   my ($doc, $classname, $arglist, $post) = @_;
+   my $braces = 0;
+   my $func_def = '';   
+   while ($braces != -1 and $post =~ /^.*?(\}|\{)/s){
+      $post = $';
+      $func_def .= "$&" if $braces == 0;
+      $braces += ($1 eq '{' ? 1 : -1 );
+   }
+   $func_def =~ s/this/$classname.prototype/g;
+   &fetch_funcs_and_classes($func_def);
 }
 
 1;
