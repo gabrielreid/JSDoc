@@ -6,6 +6,18 @@ all functions are mapped to a class using prototype-based inheritance.
 Anonymous function definitions 
 (e.g. Circle.prototype.getRadius = function(){ ...} ) are supported.
 
+Please see http://jsdoc.sourceforge.net for examples of appropriate 
+documentation style.
+
+All functions that are not mapped in a class in any way are mapped to a
+pseudo-class called '[default context]'. 
+
+For classes where properties and methods are assigned within the constructor,
+the corresponding constructor should be marked with the standalone 
+'@constructor' tag. This tells the JSDoc parser to look inside the 
+definition of this function (constructor) and map methods and properties that 
+it finds there.
+
 This application requires Perl5, as well as two additional addon modules:
     - HTML::Template, which is available from CPAN (cpan.org)
     - JSDoc.pm, which is available from the jsdoc sourceforge project 
@@ -23,6 +35,6 @@ OR
 
 If there are any questions, comments, problems or anything else, please 
 contact Gabriel Reid (gab_reid@users.sourceforge.net). This application has 
-been successfully tested on Linux (Debian and Redhat), and Windows 2000 with 
-ActivePerl.
+been successfully tested on Linux (Debian and Redhat), Mac OS X, and 
+Windows 2000 with ActivePerl.
     
