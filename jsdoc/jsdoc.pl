@@ -11,6 +11,7 @@ use strict;
 use HTML::Template;
 use File::Copy;
 use File::Basename;
+use Getopt::Long;
 use JSDoc;
 
 
@@ -19,27 +20,36 @@ use constant MAIN_TMPL => LOCATION . "main.tmpl";
 use constant ALLCLASSES_TMPL => LOCATION . 'allclasses-frame.tmpl';
 use constant ALLCLASSES_NOFRAME_TMPL => LOCATION . 'allclasses-noframe.tmpl';
 use constant INDEX_TMPL => LOCATION . 'index.tmpl';
-use constant DEST_DIR => 'js_docs_out/';
+use constant DEFAULT_DEST_DIR => 'js_docs_out/';
 use constant STYLESHEET => 'stylesheet.css';
 use constant HELPDOC => 'help-doc.html';
 use constant INDEX_ALL_TMPL => LOCATION . 'index-all.tmpl';
 
-use vars qw/ $TMPL $JS_SRC $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX /;
+use vars qw/ $TMPL $JS_SRC $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX 
+            %CLASS_ATTRS_MAP %METHOD_ATTRS_MAP %OPTIONS /;
 
 #
 # Begin main execution
 #
 
+&parse_cmdline;
+
+do '.jsdoc_config';
+warn "Error parsing config file: $@\n" if $@;
+
 $TMPL = new HTML::Template( 
    die_on_bad_params => 0, 
    filename => MAIN_TMPL);
 
-if (@ARGV < 1){
+if (@ARGV < 1 || $OPTIONS{HELP}){
+   warn "No sourcefiles supplied\n" if !$OPTIONS{HELP};
    &show_usage();
    exit(1);
 }
 
-mkdir(DEST_DIR);
+mkdir($OPTIONS{OUTPUT})
+   or die "Can't create output directory $OPTIONS{OUTPUT}: $!\n" 
+   unless (-e $OPTIONS{OUTPUT} && -d $OPTIONS{OUTPUT});
 
 # Load all of the JS source code and parse it into a code tree
 &load_sources();
@@ -63,7 +73,7 @@ sub output_class_templates {
 
    for (my $i = 0; $i < @CLASSNAMES; $i++){
       my $classname = $CLASSNAMES[$i]->{classname};
-
+      
       # Template Parameters
       my ($class, $subclasses, $class_summary, $constructor_params, 
          $next_class, $prev_class);
@@ -77,6 +87,7 @@ sub output_class_templates {
          or $constructor_params = [];
       $class_summary = $class->{constructor_summary};
       $class_summary =~ s/TODO:/<br><b>TODO:<\/b>/g if $class_summary;
+      $class_summary .= &format_class_attributes($class->{constructor_vars});
 
       # Navbar information
       $next_class = $i + 1 < @CLASSNAMES ? $CLASSNAMES[$i + 1]->{classname} 
@@ -101,7 +112,7 @@ sub output_class_templates {
       $TMPL->param(methods => &map_methods($class)); 
       $TMPL->param(method_inheritance => &map_method_inheritance($class));
       $TMPL->param(field_inheritance => &map_field_inheritance($class));
-      open FILE, '>' . DEST_DIR . "$classname.html"
+      open FILE, '>' . $OPTIONS{OUTPUT} . "$classname.html"
          or die "Couldn't open file to write : $!\n";
       print FILE $TMPL->output;
       close FILE;
@@ -113,18 +124,20 @@ sub output_class_templates {
 # Output all the non-class template files
 #
 sub output_aux_templates(){
-   $TMPL = new HTML::Template( die_on_bad_params => 1, filename => ALLCLASSES_TMPL);
+   $TMPL = new HTML::Template( die_on_bad_params => 1, 
+      filename => ALLCLASSES_TMPL);
    $DEFAULT_CLASSNAME = $CLASSNAMES[0]->{classname};
    $TMPL->param(CLASSNAMES => \@CLASSNAMES);
-   open FILE, '>' . DEST_DIR . "allclasses-frame.html"
+   open FILE, '>' . $OPTIONS{OUTPUT} . "allclasses-frame.html"
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
    close FILE;
 
-   $TMPL = new HTML::Template( die_on_bad_params => 1, filename => ALLCLASSES_NOFRAME_TMPL);
+   $TMPL = new HTML::Template( die_on_bad_params => 1, 
+      filename => ALLCLASSES_NOFRAME_TMPL);
    $DEFAULT_CLASSNAME = $CLASSNAMES[0]->{classname};
    $TMPL->param(CLASSNAMES => \@CLASSNAMES);
-   open FILE, '>' . DEST_DIR . "allclasses-noframe.html"
+   open FILE, '>' . $OPTIONS{OUTPUT} . "allclasses-noframe.html"
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
    close FILE;
@@ -132,13 +145,14 @@ sub output_aux_templates(){
 
    $TMPL = new HTML::Template( die_on_bad_params => 1, filename => INDEX_TMPL);
    $TMPL->param(DEFAULT_CLASSNAME => $DEFAULT_CLASSNAME);
-   open FILE, '>' . DEST_DIR . "index.html"
+   open FILE, '>' . $OPTIONS{OUTPUT} . "index.html"
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
    close FILE;
 
-   copy (LOCATION . STYLESHEET, DEST_DIR . STYLESHEET);
-   copy (LOCATION . HELPDOC, DEST_DIR . HELPDOC);
+   copy (LOCATION . STYLESHEET, $OPTIONS{OUTPUT} . STYLESHEET);
+   copy (LOCATION . HELPDOC, $OPTIONS{OUTPUT} . HELPDOC);
+
 }
 
 
@@ -180,15 +194,21 @@ sub build_class_tree {
 # Shown if no commandline args are given
 #
 sub show_usage(){
-   warn "Usage: jsdoc <js_sourcefile>+\n";
+   print qq{Usage: jsdoc [OPTIONS] <js_sourcefile>+
+   -h | --help          Show this message and exit
+   -p | --private       Show private methods
+   -d | --directory     Specify output directory (defaults to js_docs_out)\n};
 }
 
 # 
 # Take all the command line args as filenames and add them to the source
 #
 sub load_sources(){
-   while(<>){
-      $JS_SRC .= $_;
+   for (@ARGV){
+      open SRC, "<$_" or  (warn "Can't open $_, skipping: $!\n" and next);
+      local $/ = undef;
+      $JS_SRC = <SRC>;
+      close SRC;
    }
 }
 
@@ -237,6 +257,7 @@ sub map_methods{
    for my $method ( 
       sort {$a->{mapped_name} cmp $b->{mapped_name} }  
       @{$class->{instance_methods}}){
+         next if (!$OPTIONS{PRIVATE} && $method->{is_private});
          my @args;
          for (@{$method->{args}}){
             push @args, $_;
@@ -249,13 +270,13 @@ sub map_methods{
             method_params => \@args,
             method_returns => $method->{returns},
             is_class_method => 0,
-            is_private => $method->{is_private}
+            is_private => $method->{is_private}, 
+            attributes => &format_method_attributes($method->{vars})
             };
    }
-
-   for my $method(
-      sort {$a->{mapped_name} cmp $b->{mapped_name} } 
+   for my $method( sort {$a->{mapped_name} cmp $b->{mapped_name} } 
       @{$class->{class_methods}}){
+         next if (!$OPTIONS{PRIVATE} && $method->{is_private});
          my @args;
          for (@{$method->{args}}){
             push @args, $_;
@@ -267,7 +288,8 @@ sub map_methods{
             method_arguments => $method->{argument_list},
             method_params => \@args,
             method_returns => $method->{returns},
-            is_class_method => 1
+            is_class_method => 1,
+            attributes => &format_method_attributes($method->{vars})
             }; 
    }
    \@methods;
@@ -443,8 +465,50 @@ sub output_index_template {
    $TMPL->param( letters => $letter_list);
    $TMPL->param(index_list => [map {letter => $_->{letter_name}, value => $letters{$_->{letter_name}}}, @{$letter_list}]);
    
-   open FILE, '>' . DEST_DIR . "index-all.html"
+   open FILE, '>' . $OPTIONS{OUTPUT} . "index-all.html"
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
    close FILE;
+}
+
+#
+# Formats additional non-standard attributes for methods according to user 
+# configuration
+#
+sub format_method_attributes {
+   my ($attrs) = shift;
+   my $attributes = '<br/>';
+   while (my ($name, $val) = each %{$attrs}) {
+      $attributes .= &{$METHOD_ATTRS_MAP{$name}}($val) 
+         if $METHOD_ATTRS_MAP{$name};
+   }
+   $attributes;
+}
+
+#
+# Formats additional non-standard attributes for classes according to user 
+# configuration
+#
+sub format_class_attributes {
+   my ($attrs) = shift;
+   my $attributes = '<br/>';
+   while (my ($name, $val) = each %{$attrs}) {
+      $attributes .= &{$CLASS_ATTRS_MAP{$name}}($val) 
+         if $CLASS_ATTRS_MAP{$name};
+   }
+   $attributes;
+}
+
+
+#
+# Parses the command line options
+#
+sub parse_cmdline {
+   $OPTIONS{OUTPUT} = DEFAULT_DEST_DIR;
+   GetOptions(
+      'private|p'       => \$OPTIONS{PRIVATE},
+      'directory|d=s'   => \$OPTIONS{OUTPUT},
+      'help|h'          => \$OPTIONS{HELP} 
+   );
+   $OPTIONS{OUTPUT} =~ s/([^\/])$/$1\//;
 }

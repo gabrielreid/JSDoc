@@ -5,42 +5,61 @@
  * demonstrating the functionality of the parser
  */
 
+/*******************************************************************
+ *************        Big Block Comment ****************************
+ *******************************************************************/
 
 /**
  * This is the basic Shape class.  
  * It can be considered an abstract class, even though no such thing
- * really exists in JavaScript
+ * really existing in JavaScript
  * TODO: This is an example todo message
+ * <pre>
+ *                                           left
+ * right
+ *                                           left again
+ * </pre>
  * @constructor
+ * @with What is that
  */
 function Shape(){
   
    /**
     * This is an example of a function that is not given as a property
-    * of a prototype, but instead it is assigned within a constructor
-    *  
+    * of a prototype, but instead it is assigned within a constructor.
     * For inner functions like this to be picked up by the parser, the
     * function that acts as a constructor <b>must</b> be denoted with
     * the <b>&#64;constructor</b> tag in its comment.
-    * @returns Some complete nonsense, just a stupid declaration for testing
+    * @throws There is no exception thrown my this method, this is just
+    *         being used as an example
     */
    this.innerFunction = function(){
-      var x = 0;
-      if (x == 0){
-	return "Shape";
-      } else if (x == 2){
-        return x;
-      } else {
-         return 3;
-      }
+      return "Shape";
    }
+
+   /** This is another inner */
+   this.anotherInner = function(){
+   }
+   
+   /** This is a private method, just used here as an example */
+   function privateFunction(){
+      return 'Private';
+   }
+   
 }
 
 
 /**
  * This is an unattached function
+ * @does Nothing
+ * @return An empty string
+ * @has Not a single thing
+ * @reason There is no reason
+ * @reason Not another reason either
+ * @param One one
+ * @param Two two
  */
-function UnattachedFunction(){
+function UnattachedFunction(One, Two){
    return "";
 }
 
@@ -99,6 +118,8 @@ function Shape_SetCoords(coordinates){
 /**
  * Set the color for this Shape
  * @param color The color to set for this Shape
+ * @param other There is no other param
+ * @throws NonExistantColorException (no, not really!)
  */
 function Shape_SetColor(color){
    this.color = color;
@@ -196,7 +217,9 @@ function Rectangle_GetArea(){
 /**
  * A Square is a subclass of Rectangle
  * @param width The optional width for this Rectangle
- * @param height Thie optional height for this Rectangle
+ * @param height The optional height for this Rectangle
+ * @subclass Shape 
+ * @subclass Rectangle 
  */
 function Square(width, height){
    if (width){
