@@ -248,7 +248,8 @@ sub map_methods{
             method_arguments => $method->{argument_list},
             method_params => \@args,
             method_returns => $method->{returns},
-            is_class_method => 0
+            is_class_method => 0,
+            is_private => $method->{is_private}
             };
    }
 

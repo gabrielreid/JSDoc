@@ -263,7 +263,7 @@ sub parse_jsdoc_comment2 {
             $args{$1} = $2;
         }
         $parsed{args} = \%args;
-        while ($variable_str =~ /\@(\w+)([^\@]*)/gs) {
+        while ($variable_str =~ /\@(\w+)(.*)/gs) {
             next if $1 eq 'param';
             $vars{$1} = [] unless defined $vars{$1};
             push(@{$vars{$1}}, $2);
@@ -297,7 +297,7 @@ sub fetch_funcs_and_classes {
          my ($func, $arglist, $post) = ($2, $3, $');
          &add_function($doc, $func, $arglist);
          if ($doc =~ /\@constructor/){
-            &evaluate_constructor($doc, $func, $arglist, $post);
+            $js_src = &evaluate_constructor($doc, $func, $arglist, $post);
          }
       } elsif ($4 && $6 && $FUNCTIONS{$4}){
          &add_anonymous_function($doc, $4, $6, $7, not defined($5));
@@ -319,7 +319,8 @@ sub add_anonymous_function {
    my ($doc, $class, $function_name, $arg_list, $is_class_prop) = @_;
    &add_class($class);
    my $fake_name = "__$class.$function_name";
-   &add_function($doc, $fake_name, $arg_list);
+   my $is_private = $function_name =~ s/^__________//;
+   &add_function($doc, $fake_name, $arg_list, $is_private);
    &add_property($doc, $class, $function_name, $fake_name, $is_class_prop);
 }
 
@@ -370,7 +371,7 @@ sub add_property {
 # Add a function and its documentation to the global FUNCTION hash
 #
 sub add_function {
-   my ($doc, $function, $arg_list) = @_;
+   my ($doc, $function, $arg_list, $is_private) = @_;
    if ($FUNCTIONS{$function}){
       warn "Function $function already declared\n";
    }
@@ -382,6 +383,8 @@ sub add_function {
    my $documentation = parse_jsdoc_comment2($doc);
    my $function_ref = $FUNCTIONS{$function};
    
+   $function_ref->{is_private} = $is_private;
+
    $function_ref->{documentation} = $documentation;
    $function_ref->{description} = $documentation->{summary};
 
@@ -459,6 +462,7 @@ sub map_single_property {
    $method{description} = $function->{description};
    $method{args} = $function->{args};
    $method{returns} = $function->{returns};
+   $method{is_private} = $function->{is_private} ? 1 : 0;
    if (!$is_class_prop){
       push @{$CLASSES{$class}->{instance_methods}}, \%method;
    } else {
@@ -572,7 +576,8 @@ sub set_class_constructors {
 
 #
 # Handles a function that has been denoted as a constructor by looking for
-# inner functions and properties
+# inner functions and properties. Returns the source code minus the
+# body of the constructor
 #
 sub evaluate_constructor {
    my ($doc, $classname, $arglist, $post) = @_;
@@ -584,7 +589,9 @@ sub evaluate_constructor {
       $braces += ($1 eq '{' ? 1 : -1 );
    }
    $func_def =~ s/this/$classname.prototype/g;
+   $func_def =~ s/function\s+(\w+)/$classname.prototype.__________$1 = function/g;
    &fetch_funcs_and_classes($func_def);
+   return $post;
 }
 
 1;
