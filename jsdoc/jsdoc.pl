@@ -10,16 +10,19 @@
 use strict;
 use HTML::Template;
 use File::Copy;
+use File::Basename;
 use JSDoc;
 
-use constant MAIN_TMPL => 'main.tmpl';
-use constant ALLCLASSES_TMPL => 'allclasses-frame.tmpl';
-use constant ALLCLASSES_NOFRAME_TMPL => 'allclasses-noframe.tmpl';
-use constant INDEX_TMPL => 'index.tmpl';
+
+use constant LOCATION => dirname($0) . '/';
+use constant MAIN_TMPL => LOCATION . "main.tmpl";
+use constant ALLCLASSES_TMPL => LOCATION . 'allclasses-frame.tmpl';
+use constant ALLCLASSES_NOFRAME_TMPL => LOCATION . 'allclasses-noframe.tmpl';
+use constant INDEX_TMPL => LOCATION . 'index.tmpl';
 use constant DEST_DIR => 'js_docs_out/';
-use constant STYLESHEET => 'stylesheet.css';
-use constant HELPDOC => 'help-doc.html';
-use constant INDEX_ALL_TMPL => 'index-all.tmpl';
+use constant STYLESHEET => LOCATION . 'stylesheet.css';
+use constant HELPDOC => LOCATION . 'help-doc.html';
+use constant INDEX_ALL_TMPL => LOCATION . 'index-all.tmpl';
 
 use vars qw/ $TMPL $JS_SRC $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX /;
 
