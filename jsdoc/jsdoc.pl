@@ -12,6 +12,7 @@ use HTML::Template;
 use File::Copy;
 use File::Basename;
 use Getopt::Long;
+use Data::Dumper;
 use JSDoc;
 
 
@@ -85,7 +86,7 @@ sub output_class_templates {
       # Set up the constructor and class information
       $constructor_params = $class->{constructor_params}
          or $constructor_params = [];
-      $class_summary = $class->{constructor_summary};
+      $class_summary = &resolve_inner_links($class->{constructor_summary});
       $class_summary =~ s/TODO:/<br><b>TODO:<\/b>/g if $class_summary;
       $class_summary .= &format_class_attributes($class->{constructor_vars});
 
@@ -207,7 +208,7 @@ sub load_sources(){
    for (@ARGV){
       open SRC, "<$_" or  (warn "Can't open $_, skipping: $!\n" and next);
       local $/ = undef;
-      $JS_SRC = <SRC>;
+      $JS_SRC .= <SRC>;
       close SRC;
    }
 }
@@ -238,7 +239,7 @@ sub get_summary {
    my ($description) = @_;
    my $summary;
    if ($description){
-      ($summary) = $description =~ /^(.*?(?:[\?\!\.]|\n\n)).*$/gxs
+      ($summary) = $description =~ /^(.*?(?:[\?\!\.]|\n\n)).*$/gs
 	 or $summary = $description;
    } else {
       $summary = "";
@@ -263,8 +264,9 @@ sub map_methods{
             push @args, $_;
          }
          push @methods, {
-            method_description => $method->{description} ,
-            method_summary => &get_summary($method->{description}),
+            method_description => &resolve_inner_links($method->{description}),
+            method_summary => &resolve_inner_links(
+               &get_summary($method->{description})),
             method_name => $method->{mapped_name},
             method_arguments => $method->{argument_list},
             method_params => \@args,
@@ -282,8 +284,9 @@ sub map_methods{
             push @args, $_;
          }
          push @methods, {
-            method_description => $method->{description} ,
-            method_summary => &get_summary($method->{description}),
+            method_description => &resolve_inner_links($method->{description}),
+            method_summary => &resolve_inner_links(
+               &get_summary($method->{description})),
             method_name => $method->{mapped_name},
             method_arguments => $method->{argument_list},
             method_params => \@args,
@@ -308,8 +311,9 @@ sub map_fields {
       @{$class->{instance_fields}}){
          push @fields, { 
          field_name => $_->{field_name}, 
-         field_description => $_->{field_description}, 
-         field_summary => &get_summary($_->{field_description}),
+         field_description => &resolve_inner_links($_->{field_description}), 
+         field_summary => &resolve_inner_links(
+            &get_summary($_->{field_description})),
          is_class_field => 0
          };
    }
@@ -321,8 +325,10 @@ sub map_fields {
          @{$class->{class_fields}}){
             push @fields, { 
                field_name => $_->{field_name}, 
-               field_description => $_->{field_description}, 
-               field_summary => &get_summary($_->{field_description}),
+               field_description => &resolve_inner_links( 
+                  $_->{field_description}), 
+               field_summary => &resolve_inner_links(
+                  &get_summary($_->{field_description})),
                is_class_field => 1
                };
       }
@@ -397,17 +403,23 @@ sub map_field_inheritance {
 #
 sub add_to_index {
    my ($class, $classname) = @_;
-   push @INDEX, { name => $classname, class => $classname, type => '', linkname => '' };
+   push @INDEX, { 
+      name => $classname, 
+      class => $classname, 
+      type => '', linkname => '' 
+   };
+
    if (!$class->{constructor_args}){
       $class->{constructor_args} = '';
+   } else {
+      push @INDEX, 
+         {
+            name => "$classname$class->{constructor_args}",
+            class => $classname,
+            type => 'Constructor in ',
+            linkname => 'constructor_detail'
+         };
    }
-   push @INDEX, 
-      {
-         name => "$classname$class->{constructor_args}",
-         class => $classname,
-         type => 'Constructor in ',
-         linkname => 'constructor_detail'
-      };
    for my $method(@{$class->{class_methods}}){
       push @INDEX, 
          {
@@ -415,7 +427,7 @@ sub add_to_index {
             class => $classname,
             type => 'Class method in ',
             linkname => $method->{mapped_name}
-         };
+         } unless ($method->{is_private} and not $OPTIONS{PRIVATE});
    }
    for my $method (@{$class->{instance_methods}}){
       push @INDEX, 
@@ -424,7 +436,8 @@ sub add_to_index {
             class => $classname,
             type => 'Instance method in ',
             linkname => $method->{mapped_name}
-         };
+         } unless ($method->{is_private} and not $OPTIONS{PRIVATE});
+
    }
    for my $class_field (@{$class->{class_fields}}){
       push @INDEX, 
@@ -461,11 +474,16 @@ sub output_index_template {
    }
    
    my $letter_list = [map {letter_name => $_}, sort {$a cmp $b} keys %letters];
-   $TMPL = new HTML::Template( die_on_bad_params => 1, filename => INDEX_ALL_TMPL);
+   $TMPL = 
+      new HTML::Template( die_on_bad_params => 1, filename => INDEX_ALL_TMPL);
    $TMPL->param( letters => $letter_list);
-   $TMPL->param(index_list => [map {letter => $_->{letter_name}, value => $letters{$_->{letter_name}}}, @{$letter_list}]);
+   $TMPL->param(index_list => [
+      map {
+         letter => $_->{letter_name}, 
+         value => $letters{$_->{letter_name}}
+      }, @{$letter_list}]);
    
-   open FILE, '>' . $OPTIONS{OUTPUT} . "index-all.html"
+   open FILE, '>' . $OPTIONS{OUTPUT} . '/index-all.html'
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
    close FILE;
@@ -511,4 +529,25 @@ sub parse_cmdline {
       'help|h'          => \$OPTIONS{HELP} 
    );
    $OPTIONS{OUTPUT} =~ s/([^\/])$/$1\//;
+}
+
+sub resolve_inner_links {
+   my $doc = shift;
+   $doc =~ s{\{\@link\s+([^\}]+)\}}{&format_link($1)}eg if $doc;
+   return $doc;
+}
+
+sub format_link {
+   my ($link) = shift;
+   my ($class, $method) = $link =~ /(\w+)?(?:#(\w+))?/;
+   if (!$method){
+      "<a href=\"$class.html#\">$class<\/a>";
+   } else {
+      if ($class){
+         "<a href=\"$class.html#$method\">$class.$method()</a>";
+      }
+      else {
+         "<a href=\"#$method\">$method()</a>";
+      }
+   }
 }
