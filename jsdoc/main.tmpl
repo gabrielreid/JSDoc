@@ -147,7 +147,7 @@ DETAIL:&nbsp;<A HREF="#field_detail">FIELD</A>&nbsp;|&nbsp;<A HREF="#constructor
 
 
 <!-- ======== CONSTRUCTOR SUMMARY ======== -->
-
+<TMPL_IF NAME="constructor_args">
 <A NAME="constructor_summary"><!-- --></A>
 <TABLE BORDER="1" CELLPADDING="3" CELLSPACING="0" WIDTH="100%">
 <TR BGCOLOR="#CCCCFF" CLASS="TableHeadingColor">
@@ -166,6 +166,7 @@ DETAIL:&nbsp;<A HREF="#field_detail">FIELD</A>&nbsp;|&nbsp;<A HREF="#constructor
       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</TD>
 </TR>
 </TABLE>
+</TMPL_IF>
 <!-- ======== END CONSTRUCTOR SUMMARY ======== -->
 
 &nbsp;
@@ -247,7 +248,7 @@ DETAIL:&nbsp;<A HREF="#field_detail">FIELD</A>&nbsp;|&nbsp;<A HREF="#constructor
 <!-- ============ END FIELD DETAIL =========== -->
 
 <!-- ========= CONSTRUCTOR DETAIL ======== -->
-
+<TMPL_IF NAME="constructor_args">
 <A NAME="constructor_detail"><!-- --></A>
 <TABLE BORDER="1" CELLPADDING="3" CELLSPACING="0" WIDTH="100%">
 <TR BGCOLOR="#CCCCFF" CLASS="TableHeadingColor">
@@ -273,6 +274,7 @@ function <B><TMPL_VAR name="classname"></B><TMPL_VAR name="constructor_args"></P
    </TMPL_IF>
 
 </DL></DL>
+</TMPL_IF>
 <!-- ========= END CONSTRUCTOR DETAIL ======== -->
 
 
