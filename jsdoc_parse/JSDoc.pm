@@ -5,37 +5,31 @@ package JSDoc;
 JSDoc - parse JavaScript source file for JSDoc comments
 
 =head1 SYNOPSIS
-    
-    parse_jsdoc_source(\$js_source, \&print_comment);
-    
-    sub print_comment {
-        my($obj_name, $type, $code, $comment_ref) = @_;
-        my %comment = %{$comment_ref};
-        print "$obj_name $type\n";
-        print "$code\n";
-        if ($comment{summary}) {
-            print "summary: $comment{summary}\n";
-        }
-        if ($comment{args}) {
-            my %args = %{$comment{args}};
-            foreach (keys %args) {
-                print "$_: $args{$_}\n";
-            }
-        }
-        if ($comment{vars}) {
-            my %vars = %{$comment{vars}};
-            foreach (keys %vars) {
-                print "$_: ".join(", ", @{$vars{$_}})."\n";
-            }
-        }
-    }
-    
-=head1 DESCRIPTION
 
-The C<parse_jsdoc_source> function requires a ref to string holding the 
-source code of a javascript object file, and a ref to a callback subroutine 
-to handle any found JSDoc elements. The source file is parsed and the 
-callback is called as each element is found.
+Create JavaScript sourcefiles commented in a manner similar to javadoc
+(ie. with documentation starting with '/**' and then pass a list of references 
+to JavaScript source to parse_code_tree:
+
+   /**
+    * This is a class for example purposes
+    * @param name Name for the new object
+    * @constructor
+    */
+    function MyClass(name){
+      this.name = name;
+    }
+
+   $code_tree = parse_code_tree(@src_refs);
+
+A tree structure describing the code layout, inheritance and documentation
+is returned
+
+To clear the cache of classes and functions in the parser:
+
+   reset_parser();
+    
+
+=head1 DESCRIPTION
 
 The C<parse_code_tree> function requires a ref to a string holding the
 souce code of a javascript object file or files. It returns a data structure
@@ -94,7 +88,6 @@ data structure has the following form (for each class):
       |  +- field_description
       |  |
       |  +- field_name
-
       |
       +- inherits
          |
@@ -106,7 +99,7 @@ data structure has the following form (for each class):
 
 =head1 AUTHOR
 
-mmathews@jscan.org
+mmathews@jscan.org,
 Gabriel Reid gab_reid@users.sourceforge.net
 
 =cut
@@ -114,9 +107,10 @@ Gabriel Reid gab_reid@users.sourceforge.net
 require 5.000;
 use Carp;
 use Exporter;
+use Data::Dumper;
 
 @ISA = qw(Exporter);
-@EXPORT = qw(parse_jsdoc_source parse_code_tree);
+@EXPORT = qw(parse_code_tree reset_parser);
 
 use vars qw/ %CLASSES %FUNCTIONS /;
 #
@@ -124,20 +118,20 @@ use vars qw/ %CLASSES %FUNCTIONS /;
 # and their documentation
 #
 sub parse_code_tree {
-   my $js_src = ${$_[0]};
+   for my $js_src (map { ${$_} } @_){
+      
+      # perlify os line-endings
+      $js_src =~ s/(\r\n|\r)/\n/g;
 
-   # perlify os line-endings
-   $js_src =~ s/(\r\n|\r)/\n/g;
+      # remove all uninteresting comments
+      $js_src =~ s{//.*}{}g;
 
-   # clear out all big block comments without related code
-   $js_src =~ s/\/\*\*([^\/]|([^*]\/))*\*\/\s*\n\s*\n//sg;
-
-   &fetch_funcs_and_classes($js_src);
-
+      &fetch_funcs_and_classes($js_src);
+   }
    &map_all_properties();
 
    &build_class_hierarchy(); 
-
+   
    &set_class_constructors();
 
    for my $class(values %CLASSES){
@@ -209,8 +203,8 @@ sub fetch_funcs_and_classes {
          # Documentation
          (?:
             /\*\*                         # Opening of docs
-               ([^*]+
-                  (?:(?:\*[^/])+[^*]+)*
+               ([^/]+
+                  (?:(?:[^*]/)+[^/]+)*
                )
             \*/\s*\n\s*                   # Closing of docs
          )?
@@ -270,9 +264,13 @@ sub add_anonymous_function {
    my ($doc, $class, $function_name, $arg_list, $is_class_prop) = @_;
    &add_class($class);
    my $fake_name = "__$class.$function_name";
-   my $is_private = $function_name =~ s/^__________//;
+   
+   # This is dirty
+   my $is_private = $function_name =~ s/^__________// || $doc =~ /\@private/;
+
    &add_function($doc, $fake_name, $arg_list, $is_private) and
-      &add_property($doc, $class, $function_name, $fake_name, $is_class_prop); 
+      &add_property($doc, $class, $function_name, $fake_name, $is_class_prop);
+
 }
 
 
@@ -304,10 +302,15 @@ sub set_base_class {
 #
 sub add_property {
    my ($doc, $class, $property, $value, $is_class_property) = @_;
-
    &add_class($class);
    $doc =~ s/^[\t \*]*//gm;
    my $key = $is_class_property ? '_class_properties' : '_instance_properties';
+   for my $classref (@{$CLASSES{$class}->{$key}}){
+      if ($classref->{property_name} eq $property){
+         warn "Already bound property '$property' to '$class'\n";
+         return;
+      }
+   }
    push @{$CLASSES{$class}->{$key}}, 
       {
 	 property_doc => $doc,
@@ -412,11 +415,10 @@ sub map_single_property {
    my $function = $FUNCTIONS{$prop_val};
    $function->{is_mapped} = 1;
    $method{mapped_name} = $prop_name;
-   $method{argument_list} = $function->{argument_list}; 
-   $method{description} = $function->{description};
-   $method{args} = $function->{args};
-   $method{returns} = $function->{returns};
-   $method{vars} = $function->{vars};
+
+   $method{$_} = $function->{$_} for 
+      qw/ argument_list description args returns vars /;
+
    delete $method{vars}->{returns};
    $method{is_private} = $function->{is_private} ? 1 : 0;
    if (!$is_class_prop){
@@ -553,6 +555,10 @@ sub evaluate_constructor {
    }
    $func_def =~ s/this(?=\.\w+\s*=\s*function)/$classname.prototype/g;
    
+   my %inner_funcs = map { $_ => 1 } $func_def =~ /function\s+(\w+)/g;
+ 
+   $func_def =~ s/this(?=\.\w+\s*=\s*\w+)/$classname.prototype/g;
+
    $func_def =~ s/
       function\s+(\w+)
       (?=\([^)]*\))/
@@ -561,9 +567,25 @@ sub evaluate_constructor {
          ($method_map{$1} ? $method_map{$1} : "__________$1") . 
          " = function"
       }/egx;
+   
+   # Sweep out all the converted assignments of inner functions
+   $func_def =~ s/
+   ($classname\.prototype\.\w+\s*=\s*(\w+))/
+   {
+      $inner_funcs{$2} ? '' : "$1"
+   }/egx;
 
    &fetch_funcs_and_classes($func_def);
    return $post;
+}
+
+# 
+# Clear out everything from the parsed classes and functions
+#
+sub reset_parser 
+{
+	%CLASSES = ();
+	%FUNCTIONS = ();
 }
 
 1;

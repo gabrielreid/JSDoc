@@ -3,17 +3,21 @@
 <HTML>
 <HEAD>
 <TITLE>
-All Classes
+<TMPL_VAR NAME="project_name"> All Classes
 </TITLE>
 <LINK REL ="stylesheet" TYPE="text/css" HREF="stylesheet.css" TITLE="Style">
 </HEAD>
 <SCRIPT>
 function asd()
 {
-parent.document.title="All Classes";
+parent.document.title="<TMPL_VAR NAME="project_name"> All Classes";
 }
 </SCRIPT>
 <BODY BGCOLOR="white" onload="asd();">
+<TMPL_IF NAME="logo">
+   <IMG SRC="<TMPL_VAR NAME="logo">"/>
+</TMPL_IF>
+<H3 class="FrameHeadingFont"><B><TMPL_VAR NAME="project_name"></B></H3>
 <FONT size="+1" CLASS="FrameHeadingFont">
 <B>All Classes</B></FONT>
 <BR>

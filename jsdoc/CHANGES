@@ -1,0 +1,43 @@
+JSDoc 1.4
+=========
+
+- Added @attributes: @author, @deprecated, @see, @version, @requires, @throws
+
+- Updated pod (removed documentation for non-existant parse_jsdoc_source, 
+added a small example)
+
+- Added function to reset the parser (reset_parser)
+
+- Fixed bug where the same property could be bound to a class's prototype
+more than once
+
+- Fixed bug where embedded // comments would break the parser
+
+- Added ability to set project name, page footer, logo and project summary
+(thanks to Jeff Conrad for code and suggestions)
+
+- Added overview summary (thanks to Jeff Conrad for code)
+
+- Split up loading/parsing of sources file to prevent crashes that were caused
+by overloading the regex engine
+
+- Added overview-tree (thanks to Jeff Conrad for the code contribution)
+
+- Fixed bug where some assignments of methods to instances in a constructor
+would get lost
+
+- Fix in doc-parsing where a line with only a star and a newline would get
+passed over
+
+- Added ability to 'hide' methods with @private
+
+
+JSDoc 1.3
+=========
+
+- When a function is marked with @constructor, it will always be dealt
+with as a class
+
+- Improved doc regex
+
+- Added recursive directory handling

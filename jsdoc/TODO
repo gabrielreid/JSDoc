@@ -1,0 +1,18 @@
+TODO for JSDoc
+
+- Make handling of @attributes consistent all over (@param and @return are 
+handled by parser, others are handled in jsdoc.pl)
+
+- Update website
+
+- Fix bug where {@link whatever} doesn't work for inner functions
+
+- Add command line params --quiet, --dump-tree
+
+- Add command line param --stylesheet
+
+- Make navbar links selective so they are never broken
+
+- Add in support for more javadoc @attributes (in the maps) 
+
+- Update the help doc

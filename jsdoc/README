@@ -6,10 +6,8 @@ all functions are mapped to a class using prototype-based inheritance.
 Anonymous function definitions 
 (e.g. Circle.prototype.getRadius = function(){ ...} ) are supported.
 
-This application requires Perl5, as well as two additional addon modules:
+This application requires Perl5, as well as one non-standard addon module:
     - HTML::Template, which is available from CPAN (cpan.org)
-    - JSDoc.pm, which is available from the jsdoc sourceforge project 
-	(sourceforge.net/projects/jsdoc)
 
 Invocation is simple: Just run the application, giving one or more well-formed 
 OO JavaScript sourcefilename(s) as arguments. A sample JS sourcefile, test.js, 

@@ -14,13 +14,7 @@
  * It can be considered an abstract class, even though no such thing
  * really existing in JavaScript
  * TODO: This is an example todo message
- * <pre>
- *                                           left
- * right
- *                                           left again
- * </pre>
  * @constructor
- * @with What is that
  */
 function Shape(){
   
@@ -30,8 +24,6 @@ function Shape(){
     * For inner functions like this to be picked up by the parser, the
     * function that acts as a constructor <b>must</b> be denoted with
     * the <b>&#64;constructor</b> tag in its comment.
-    * @throws There is no exception thrown my this method, this is just
-    *         being used as an example
     */
    this.innerFunction = function(){
       return "Shape";
@@ -50,12 +42,7 @@ function Shape(){
 
 
 /**
- * This is an unattached function
- * @does Nothing
- * @return An empty string
- * @has Not a single thing
- * @reason There is no reason
- * @reason Not another reason either
+ * This is an unattached function 
  * @param One one
  * @param Two two
  */
@@ -70,7 +57,7 @@ function UnattachedFunction(One, Two){
 Shape.prototype.color = null;
 
 /**
- * The border of this shape
+ * The border of this shape. 
  */
 Shape.prototype.border = null;
 
@@ -102,6 +89,7 @@ function Shape_GetCoords(){
 
 /**
  * Get the color of this shape
+ * @see #setColor
  */
 function Shape_GetColor(){
    return this.color;
@@ -215,11 +203,9 @@ function Rectangle_GetArea(){
 
 
 /**
- * A Square is a subclass of Rectangle
+ * A Square is a subclass of {@link Rectangle}
  * @param width The optional width for this Rectangle
  * @param height The optional height for this Rectangle
- * @subclass Shape 
- * @subclass Rectangle 
  */
 function Square(width, height){
    if (width){
