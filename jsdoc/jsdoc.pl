@@ -20,8 +20,8 @@ use constant ALLCLASSES_TMPL => LOCATION . 'allclasses-frame.tmpl';
 use constant ALLCLASSES_NOFRAME_TMPL => LOCATION . 'allclasses-noframe.tmpl';
 use constant INDEX_TMPL => LOCATION . 'index.tmpl';
 use constant DEST_DIR => 'js_docs_out/';
-use constant STYLESHEET => LOCATION . 'stylesheet.css';
-use constant HELPDOC => LOCATION . 'help-doc.html';
+use constant STYLESHEET => 'stylesheet.css';
+use constant HELPDOC => 'help-doc.html';
 use constant INDEX_ALL_TMPL => LOCATION . 'index-all.tmpl';
 
 use vars qw/ $TMPL $JS_SRC $CLASSES $DEFAULT_CLASSNAME @CLASSNAMES @INDEX /;
@@ -137,8 +137,8 @@ sub output_aux_templates(){
    print FILE $TMPL->output;
    close FILE;
 
-   copy (STYLESHEET, DEST_DIR . STYLESHEET);
-   copy (HELPDOC, DEST_DIR . HELPDOC);
+   copy (LOCATION . STYLESHEET, DEST_DIR . STYLESHEET);
+   copy (LOCATION . HELPDOC, DEST_DIR . HELPDOC);
 }
 
 
