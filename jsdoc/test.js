@@ -9,10 +9,39 @@
 /**
  * This is the basic Shape class.  
  * It can be considered an abstract class, even though no such thing
- * really existing in JavaScript
+ * really exists in JavaScript
  * TODO: This is an example todo message
+ * @constructor
  */
 function Shape(){
+  
+   /**
+    * This is an example of a function that is not given as a property
+    * of a prototype, but instead it is assigned within a constructor
+    *  
+    * For inner functions like this to be picked up by the parser, the
+    * function that acts as a constructor <b>must</b> be denoted with
+    * the <b>&#64;constructor</b> tag in its comment.
+    * @returns Some complete nonsense, just a stupid declaration for testing
+    */
+   this.innerFunction = function(){
+      var x = 0;
+      if (x == 0){
+	return "Shape";
+      } else if (x == 2){
+        return x;
+      } else {
+         return 3;
+      }
+   }
+}
+
+
+/**
+ * This is an unattached function
+ */
+function UnattachedFunction(){
+   return "";
 }
 
 
