@@ -211,14 +211,14 @@ sub find_subclasses(){
 
 #
 # Make a summary of a description, cutting it off either at the first
-# newline or the first period.
+# double newline or the first period.
 # PARAM: $description
 #
 sub get_summary {
    my ($description) = @_;
    my $summary;
    if ($description){
-      ($summary) = $description =~ /^\s*(\w.*?[\n\.]).*$/gxs
+      ($summary) = $description =~ /^(.*?(?:[\?\!\.]|\n\n)).*$/gxs
 	 or $summary = $description;
    } else {
       $summary = "";
