@@ -207,7 +207,13 @@ sub fetch_funcs_and_classes {
    
    while ($js_src =~ m!
          # Documentation
-         (?:/\*\*(.*?)\*/\s*\n\s*)?                            
+         (?:
+            /\*\*                         # Opening of docs
+               ([^*]+
+                  (?:(?:\*[^/])+[^*]+)*
+               )
+            \*/\s*\n\s*                   # Closing of docs
+         )?
          
          # Function
          (?:(?:function\s*(\w+)\s*(\(.*?\))\s*\{)|         
@@ -233,6 +239,11 @@ sub fetch_funcs_and_classes {
          my ($func, $arglist, $post) = ($2, $3, $');
          &add_function($doc, $func, $arglist);
          if ($doc =~ /\@constructor/){
+            # 
+            # Because this is marked as a constructor, we always add it
+            # as a class
+            #
+            &add_class($func);
             $js_src = &evaluate_constructor($doc, $func, $arglist, $post);
          }
       } elsif ($4 && $6 && $FUNCTIONS{$4}){
