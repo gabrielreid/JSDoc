@@ -107,6 +107,7 @@ data structure has the following form (for each class):
 =head1 AUTHOR
 
 mmathews@jscan.org
+Gabriel Reid gab_reid@users.sourceforge.net
 
 =cut
 
