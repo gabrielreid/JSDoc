@@ -115,98 +115,10 @@ require 5.000;
 use Carp;
 use Exporter;
 
-use Data::Dumper;
-
 @ISA = qw(Exporter);
 @EXPORT = qw(parse_jsdoc_source parse_code_tree);
 
 use vars qw/ %CLASSES %FUNCTIONS /;
-
-sub parse_jsdoc_source {
-
-#params:
-    # a reference to a scalar, the js object source code
-    my $js_src = ${$_[0]};
-    # a reference to a sub, used as a callback
-    my $handle_comment = $_[1];
-    
-    # perlify os line-endings
-    $js_src =~ s/(\r\n|\r)/\n/g;
-    
-    while ($js_src =~ m!
-                            /\*\*         # the start of a JSDoc comment
-                            (.*?)         # everything within that comment
-                            \*/           # the end of a JSDoc comment
-                            \s*\n\s*      # possible whitespace and a newline
-                            (.*?)         # everything on the following line
-                            (\n|;|//)     # up to one of these statement terminators
-                       !gsx) {
-
-
-
-        # grab the contents of a doc-comment and the line of code that follows
-        my ($doc, $code) = ($1, $2);
-
-        # trim leading whitespace and asterisks from doc-comment
-        $doc =~ s/^[\t \*]*//gm;
-        
-        # is the code a constructor def? like this:
-        # ObjectName = function(arg, arg) {
-        # function ObjectName(arg, arg) {
-        if ($code =~ m!^\s*([A-Z]\w*)\s*=\s*function\s*(\(.*?\))\w*\{?!
-        or $code =~ m!^\s*function\s+([A-Z]\w*)\s*(\(.*?\))\w*\{?!) {
-            &$handle_comment($1, "CONSTRUCTOR", "new $1$2", parse_jsdoc_comment($doc));
-        }
-        
-        # is the code a property def? like this:
-        # ObjectName.prototype.property = function(arg, arg)
-        # ObjectName.prototype.property = "value"
-        if ($code =~ m!^\s*([A-Z]\w*)\.prototype\.(\w+)(\s*=\s*function\s*(\(.*?\)))?!) {
-            if ($4) {
-                &$handle_comment($1, "METHOD", "$1.$2$4", parse_jsdoc_comment($doc));
-            }
-            else {
-                &$handle_comment($1, "PROPERTY", "$1.$2", parse_jsdoc_comment($doc));
-            }
-        }
-
-    }
-}
-
-sub parse_jsdoc_comment {
-    my $doc = shift;
-
-    # remember each part that is parsed
-    my %parsed = ();
-    
-    # the first paragraph could be a summary statement
-    # a paragraph may follow of variable defs (variable names start with "@")
-    my ($summary, $variable_str) = $doc =~ /^\s*([^@].*?)\s*(?:\n\n\s*(.*)\s*)?$/gs;
-    
-    $parsed{summary} = $summary;
-
-    # two types of variable def can be dealt with here:
-    # a @argument has a two-part value -- the arg name and a description
-    # all other @<variables> only have a single value each (although there may
-    # be many variables with the same name)
-    if($variable_str) {
-        my %args = ();
-        my %vars = ();
-        while ($variable_str =~ /(?:^|\s*\n)\@argument\s+(\w+)\s+(\S.*?)(?=\n\n|\n@|$)/gs) {
-            $args{$1} = $2;
-        }
-        $parsed{args} = \%args;
-
-        while ($variable_str =~ /(?:^|\s*\n)\@(?!argument)(\w+)\s+(\S.*?)(?=\n\n|\n@|$)/gs) {
-            $vars{$1} = [] unless defined $vars{$1};
-            push(@{$vars{$1}}, $2);
-        }
-        $parsed{vars} = \%vars;
-    }
-    return \%parsed;
-}
-
-
 #
 # Public function that returns a datastructure representing the JS classes
 # and their documentation
@@ -232,27 +144,33 @@ sub parse_code_tree {
       delete $class->{_class_properties};
       delete $class->{_instance_properties};
    }
-   
    return \%CLASSES;
 }
 
 #
-# This is just an altered version of the original implementation because
-# I encountered some problems with that one, but don't want to break anything
-# that is based on it
+# Parses up a a jsdoc comment into its component parts
 # PARAM: The document string to be parsed
 #
-sub parse_jsdoc_comment2 {
+sub parse_jsdoc_comment {
    my $doc = shift;
-  
+
    $doc =~ s/^\s*\*//gm;
 
    # remember each part that is parsed
    my %parsed = ();
-   
+
    # the first paragraph could be a summary statement
    # a paragraph may follow of variable defs (variable names start with "@")
-   my ($summary, $variable_str) = $doc =~ /^\s*(.*?)\s*(@.*)?$/gxs;
+   my ($summary, $variable_str) = $doc =~ 
+                     /^\s*
+                     (
+                        (?:[^{@]|(?:\{[^@]))*
+                        (?:\{\@
+                           (?:[^{@]|(?:\{[^@]))*
+                        )*)
+                     \s*
+                     (.*)
+                     $/xs;
 
    $parsed{summary} = $summary;
 
@@ -268,7 +186,7 @@ sub parse_jsdoc_comment2 {
           $args{$1} = $2;
        }
        $parsed{args} = \%args;
-       while ($variable_str =~ /\@(\w+)([^\@]*)/gs) {
+       while ($variable_str =~ /(?!\{)\@(\w+)(?!\})([^\@]*)/gs) {
            my ($name, $val) = ($1, $2);
            next if $name eq 'param' || $name eq 'argument';
            $name =~ s/^return$/returns/; # Allow returns and return to be used
@@ -286,18 +204,30 @@ sub parse_jsdoc_comment2 {
 #
 sub fetch_funcs_and_classes {
    my $js_src = shift;
-    
+   
    while ($js_src =~ m!
-         (?:/\*\*(.*?)\*/\s*\n\s*)?                   # Documentation
-         (?:(?:function\s*(\w+)\s*(\(.*?\))\s*\{)|         # Function
-         (?:(\w+)(\.prototype)?\.(\w+)\s*=\s*function\s*(\(.*?\)))| # Anonymous function 
-         (?:(\w+)\.prototype\.(\w+)\s*=\s*(.*?);)|    # Instance property 
-         (?:(\w+)\.prototype\s*=\s*new\s*(\w+)\(.*?\)\s*;)| #Inheritance
-         (?:(\w+)\.(\w+)\s*=\s*(.*?);))        # Class property
+         # Documentation
+         (?:/\*\*(.*?)\*/\s*\n\s*)?                            
+         
+         # Function
+         (?:(?:function\s*(\w+)\s*(\(.*?\))\s*\{)|         
+         
+         # Anonymous function
+         (?:(\w+)(\.prototype)?\.(\w+)\s*=\s*function\s*(\(.*?\)))|  
+
+         # Instance property 
+         (?:(\w+)\.prototype\.(\w+)\s*=\s*(.*?);)|    
+
+         #Inheritance
+         (?:(\w+)\.prototype\s*=\s*new\s*(\w+)\(.*?\)\s*;)| 
+
+         # Class property
+         (?:(\w+)\.(\w+)\s*=\s*(.*?);))        
       !gsx){
 
       my $doc;
       $doc = $1 or $doc = "";
+
 
       if ($2){
          my ($func, $arglist, $post) = ($2, $3, $');
@@ -306,6 +236,10 @@ sub fetch_funcs_and_classes {
             $js_src = &evaluate_constructor($doc, $func, $arglist, $post);
          }
       } elsif ($4 && $6 && $FUNCTIONS{$4}){
+         # Anonymous functions added onto a class or class prototype
+         &add_anonymous_function($doc, $4, $6, $7, not defined($5));
+      } elsif ($4 && $6 && not defined($FUNCTIONS{$4})){
+         # Called for methods added to the prototype of core classes
          &add_anonymous_function($doc, $4, $6, $7, not defined($5));
       } elsif ($8 && $9 && defined($10)) {
          &add_property($doc, $8, $9, $10, 0);
@@ -326,8 +260,8 @@ sub add_anonymous_function {
    &add_class($class);
    my $fake_name = "__$class.$function_name";
    my $is_private = $function_name =~ s/^__________//;
-   &add_function($doc, $fake_name, $arg_list, $is_private);
-   &add_property($doc, $class, $function_name, $fake_name, $is_class_prop);
+   &add_function($doc, $fake_name, $arg_list, $is_private) and
+      &add_property($doc, $class, $function_name, $fake_name, $is_class_prop); 
 }
 
 
@@ -380,13 +314,14 @@ sub add_function {
    my ($doc, $function, $arg_list, $is_private) = @_;
    if ($FUNCTIONS{$function}){
       warn "Function $function already declared\n";
+      return 0;
    }
    $FUNCTIONS{$function} = {};
    my $func = $FUNCTIONS{$function};
    $arg_list and $func->{argument_list} = join(" ", split("\\s+", $arg_list))
       or $func->{argument_list} = "()";
     
-   my $documentation = parse_jsdoc_comment2($doc);
+   my $documentation = parse_jsdoc_comment($doc);
    my $function_ref = $FUNCTIONS{$function};
    
    $function_ref->{is_private} = $is_private;
@@ -599,13 +534,23 @@ sub evaluate_constructor {
       $func_def .= "$&" if $braces == 0;
       $braces += ($1 eq '{' ? 1 : -1 );
    }
+  
+   # Build a table of internally defined public methods
+   my %method_map;
+   while (($func_def =~ /this.(\w+)\s*=\s*([_a-zA-Z]+\w*)\s*;/g)){
+      $method_map{$2} = $1;
+   }
+   $func_def =~ s/this(?=\.\w+\s*=\s*function)/$classname.prototype/g;
    
-   # Get rid of the documentation
-   ($func_def =~ s/(\/\*\*.*?\*\/)//s) && ($doc = $1);
-   $func_def =~ s/this/$classname.prototype/g;
-   $func_def =~ s/function\s+(\w+)/$classname.prototype.__________$1 = function/g;
-   # And then add it back on
-   $doc and ($func_def = $doc . $func_def);
+   $func_def =~ s/
+      function\s+(\w+)
+      (?=\([^)]*\))/
+      {
+         "$classname.prototype." . 
+         ($method_map{$1} ? $method_map{$1} : "__________$1") . 
+         " = function"
+      }/egx;
+
    &fetch_funcs_and_classes($func_def);
    return $post;
 }
