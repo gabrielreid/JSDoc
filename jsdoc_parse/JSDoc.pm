@@ -263,7 +263,7 @@ sub parse_jsdoc_comment2 {
             $args{$1} = $2;
         }
         $parsed{args} = \%args;
-        while ($variable_str =~ /\@(\w+)(.*)/gs) {
+        while ($variable_str =~ /\@(\w+)([^\n]*)/gs) {
             next if $1 eq 'param';
             $vars{$1} = [] unless defined $vars{$1};
             push(@{$vars{$1}}, $2);
