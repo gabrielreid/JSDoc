@@ -1,9 +1,24 @@
 TODO for JSDoc
 
+- package naming (maybe syntax-highlighted source view too?)
+
+- /* blah */ still can be in a paramter list in the docs
+ 
+- support for a time stamp
+
+- Some of the ->{vars} are set to undef, should be an empty map
+
+- Clean up the static, private and final markers (spacing)
+
+- Make static/final/etc line up on one line with non-breaking spaces
+
+- Make jsdoc.pl easily runnable from anywhere without having to install
+JSDoc.pm in the @INC
+
+- Add an @extends construct
+
 - Make handling of @attributes consistent all over (@param and @return are 
 handled by parser, others are handled in jsdoc.pl)
-
-- Update website
 
 - Fix bug where {@link whatever} doesn't work for inner functions
 

@@ -1,3 +1,31 @@
+JSDoc 1.5
+===========
+
+- Fixed bug that would break HTML links within documentation
+
+- Fixed bug in path to logo in IMG tags
+
+- Added support for type information for both methods and fields
+
+- Added suppport for @private in instance fields
+
+- Fixed bug where private methods would show up in the inherited methods list
+  in subclasses
+
+- Private class methods are now also supported
+
+- Method parameters details are displayed in the same order as the parameter 
+  list for a method
+
+- Moved more info into the 'vars' member of methods, and away from the parser
+
+- Added @final (with synonym @const) for class and instance properties
+
+- Fix in parser where string literals bound to classes in a constructor were
+  not caught by the parser
+
+
+
 JSDoc 1.4
 =========
 

@@ -45,6 +45,8 @@ data structure has the following form (for each class):
       |
       +- constructor_summary
       |
+      +- constructor_vars
+      |
       +- class_methods
       |  |
       |  +- description
@@ -53,13 +55,7 @@ data structure has the following form (for each class):
       |  |
       |  +- argument_list
       |  |
-      |  +- args
-      |  |  |
-      |  |  +- vardescrip
-      |  |  |
-      |  |  +- varname
-      |  |
-      |  +- returns
+      |  +- vars 
       |
       +- instance_methods
       |  |
@@ -69,25 +65,23 @@ data structure has the following form (for each class):
       |  |
       |  +- argument_list
       |  |
-      |  +- args
-      |  |  |
-      |  |  +- vardescrip
-      |  |  |
-      |  |  +- varname
-      |  |
-      |  +- returns
+      |  +- vars 
       | 
       +- class_fields
       |  |
       |  +- field_description
       |  |
       |  +- field_name
+      |  |
+      |  +- field_vars
       |
       +- instance_fields
       |  |
       |  +- field_description
       |  |
       |  +- field_name
+      |  |
+      |  +- field_vars
       |
       +- inherits
          |
@@ -123,8 +117,12 @@ sub parse_code_tree {
       # perlify os line-endings
       $js_src =~ s/(\r\n|\r)/\n/g;
 
-      # remove all uninteresting comments
-      $js_src =~ s{//.*}{}g;
+      # remove all uninteresting comments, but only if they're not inside
+      # of other comments
+      {
+         no warnings;
+         $js_src =~ s{(/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)|//.*}{$1}g;
+      }
 
       &fetch_funcs_and_classes($js_src);
    }
@@ -174,16 +172,9 @@ sub parse_jsdoc_comment {
    # all other @<variables> only have a single value each (although there may
    # be many variables with the same name)
    if($variable_str) {
-       my %args = ();
        my %vars = ();
-       while ($variable_str =~ /\@(?:param|argument)\s+(\w+)\s+([^\@]*)/gs) {
-          $args{$1} = $2;
-       }
-       $parsed{args} = \%args;
-       while ($variable_str =~ /(?!\{)\@(\w+)(?!\})([^\@]*)/gs) {
+       while ($variable_str =~ /(?!\{)\@(\w+)(?!\})\s*([^\@]*)\s*/gs) {
            my ($name, $val) = ($1, $2);
-           next if $name eq 'param' || $name eq 'argument';
-           $name =~ s/^return$/returns/; # Allow returns and return to be used
            $vars{$name} = [] unless defined $vars{$name};
            push(@{$vars{$name}}, $val);
        }
@@ -269,7 +260,8 @@ sub add_anonymous_function {
    my $is_private = $function_name =~ s/^__________// || $doc =~ /\@private/;
 
    &add_function($doc, $fake_name, $arg_list, $is_private) and
-      &add_property($doc, $class, $function_name, $fake_name, $is_class_prop);
+      &add_property(
+         $doc, $class, $function_name, $fake_name, $is_class_prop);
 
 }
 
@@ -303,7 +295,8 @@ sub set_base_class {
 sub add_property {
    my ($doc, $class, $property, $value, $is_class_property) = @_;
    &add_class($class);
-   $doc =~ s/^[\t \*]*//gm;
+   my $parsed_doc = &parse_jsdoc_comment($doc);
+   $doc = $parsed_doc->{summary};
    my $key = $is_class_property ? '_class_properties' : '_instance_properties';
    for my $classref (@{$CLASSES{$class}->{$key}}){
       if ($classref->{property_name} eq $property){
@@ -311,13 +304,14 @@ sub add_property {
          return;
       }
    }
+
    push @{$CLASSES{$class}->{$key}}, 
       {
 	 property_doc => $doc,
 	 property_name => $property,
-	 property_value => $value
+	 property_value => $value,
+         property_vars => $parsed_doc->{vars} 
       };
-
 }
 
 
@@ -338,25 +332,12 @@ sub add_function {
    my $documentation = parse_jsdoc_comment($doc);
    my $function_ref = $FUNCTIONS{$function};
    
-   $function_ref->{is_private} = $is_private;
-
    $function_ref->{documentation} = $documentation;
    $function_ref->{description} = $documentation->{summary};
 
-   for (keys %{$function_ref->{documentation}->{args}}){
-      if ($_ and $function_ref->{documentation}->{args}->{$_}){
-         push @{$function_ref->{args}}, { 
-            varname => $_,
-            vardescrip => $function_ref->{documentation}->{args}->{$_}
-         };
-      }    
-   }
-   if ($function_ref->{documentation}->{vars}->{returns}){
-      $function_ref->{returns} = 
-         $function_ref->{documentation}->{vars}->{returns}->[0];
-   } 
    $function_ref->{vars} = $function_ref->{documentation}->{vars};
-
+   $function_ref->{vars}->{private} = 1 if $is_private;
+   1;
 }
 
 
@@ -369,7 +350,9 @@ sub map_all_properties {
          my $description = $class_property->{property_doc};
          my $prop_name = $class_property->{property_name};
          my $prop_val = $class_property->{property_value};
-         &map_single_property($class, $prop_name, $prop_val, $description, 1);
+         my $prop_vars = $class_property->{property_vars};
+         &map_single_property(
+            $class, $prop_name, $prop_val, $description, $prop_vars, 1);
       }
    }
 
@@ -378,7 +361,9 @@ sub map_all_properties {
          my $description = $instance_property->{property_doc};
          my $prop_name = $instance_property->{property_name};
          my $prop_val = $instance_property->{property_value};
-         &map_single_property ($class, $prop_name, $prop_val, $description, 0);
+         my $prop_vars = $instance_property->{property_vars};
+         &map_single_property (
+            $class, $prop_name, $prop_val, $description, $prop_vars, 0);
       }
    }
 
@@ -387,7 +372,7 @@ sub map_all_properties {
    &add_class($classname);
    for my $function (grep !($FUNCTIONS{$_}->{is_mapped} || $CLASSES{$_}), 
       keys %FUNCTIONS){
-         &map_single_property($classname, $function, $function, '', 1);
+         &map_single_property($classname, $function, $function, '', undef, 1);
    }
 }
 
@@ -395,18 +380,22 @@ sub map_all_properties {
 # Map a single instance or class field or method 
 #
 sub map_single_property {
-   my ($class, $prop_name, $prop_val, $description, $is_class_prop) = @_;
+   my ($class, $prop_name, $prop_val, 
+      $description, $vars, $is_class_prop) = @_;
+
    if (!$FUNCTIONS{$prop_val}){
       if (!$is_class_prop){
          push @{$CLASSES{$class}->{instance_fields}}, { 
             field_name => $prop_name,
-            field_description => $description
+            field_description => $description,
+            field_vars => $vars
          };
-      return;
+         return;
       } else {
          push @{$CLASSES{$class}->{class_fields}}, { 
             field_name => $prop_name,
-            field_description => $description
+            field_description => $description,
+            field_vars => $vars
          };
          return;
       }
@@ -417,10 +406,8 @@ sub map_single_property {
    $method{mapped_name} = $prop_name;
 
    $method{$_} = $function->{$_} for 
-      qw/ argument_list description args returns vars /;
+      qw/ argument_list description vars /;
 
-   delete $method{vars}->{returns};
-   $method{is_private} = $function->{is_private} ? 1 : 0;
    if (!$is_class_prop){
       push @{$CLASSES{$class}->{instance_methods}}, \%method;
    } else {
@@ -557,7 +544,10 @@ sub evaluate_constructor {
    
    my %inner_funcs = map { $_ => 1 } $func_def =~ /function\s+(\w+)/g;
  
-   $func_def =~ s/this(?=\.\w+\s*=\s*\w+)/$classname.prototype/g;
+   $func_def =~ 
+      s/
+         this(?=\.\w+\s*=\s*
+         (('[^'\n]*')|("[^"\n]*")|\w+))/$classname.prototype/gx;
 
    $func_def =~ s/
       function\s+(\w+)
@@ -574,7 +564,6 @@ sub evaluate_constructor {
    {
       $inner_funcs{$2} ? '' : "$1"
    }/egx;
-
    &fetch_funcs_and_classes($func_def);
    return $post;
 }

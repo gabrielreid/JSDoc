@@ -113,6 +113,15 @@ function Shape_SetColor(color){
    this.color = color;
 }
 
+/**
+ * Clone this shape
+ * @returns A copy of this shape
+ * @type Shape
+ * @author Gabriel Reid
+ */
+Shape.prototype.clone = function(){
+   return new Shape();
+}
 
 /**
  * A basic rectangle class, inherits from Shape.
@@ -120,7 +129,9 @@ function Shape_SetColor(color){
  * @param width The optional width for this Rectangle
  * @param height Thie optional height for this Rectangle
  */
-function Rectangle(width, height){
+function Rectangle(width, // This is the width 
+                  height // This is the height
+                  ){
    if (width){
       this.width = width;
       if (height){
@@ -129,11 +140,16 @@ function Rectangle(width, height){
    }
 }
 
+
 /* Inherit from Shape */
 Rectangle.prototype = new Shape();
 
 /**
- * Value to represent the width of the Rectangle
+ * Value to represent the width of the Rectangle.
+ * <br>Text in <b>bold</b> and <i>italic</i> and a 
+ * link to <a href="http://sf.net">SourceForge</a>
+ * @private
+ * @type int
  */
 Rectangle.prototype.width = 0;
 
@@ -261,11 +277,15 @@ function Circle(radius){
 /* Circle inherits from Shape */
 Circle.prototype = new Shape();
 
-/** The radius value for this Circle */
+/** 
+ * The radius value for this Circle 
+ * @private
+ */
 Circle.prototype.radius = 0;
 
 /** 
- * A very simple class (static) field 
+ * A very simple class (static) field that is also a constant
+ * @final
  */
 Circle.PI = 3.14;
 
@@ -293,6 +313,7 @@ function Circle_SetRadius(radius){
 /** 
  * A class (static) method.
  * @param test This is a test param
+ * @private
  */
 function Circle_GetClassName(test){
    return "Circle";

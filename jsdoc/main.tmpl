@@ -114,7 +114,7 @@ DETAIL:&nbsp;<A HREF="#field_detail">FIELD</A>&nbsp;|&nbsp;<A HREF="#constructor
    <TMPL_LOOP name="fields">
    <TR BGCOLOR="white" CLASS="TableRowColor">
    <TD ALIGN="right" VALIGN="top" WIDTH="1%"><FONT SIZE="-1">
-   <CODE><TMPL_IF NAME="is_class_field">&lt;static&gt; </TMPL_IF>&nbsp;var</CODE></FONT></TD>
+   <CODE><TMPL_IF NAME="is_private">&lt;private&gt;&nbsp;</TMPL_IF><TMPL_IF NAME="is_class_field">&lt;static&gt; </TMPL_IF><TMPL_IF NAME="is_final">&nbsp;&lt;final&gt;</TMPL_IF>&nbsp;<TMPL_VAR NAME="type"></CODE></FONT></TD>
    <TD><CODE><B><A HREF="#<TMPL_VAR name="field_name">"><TMPL_VAR name="field_name"></A></B></CODE>
    <BR>
    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<TMPL_VAR name="field_summary"></TD>
@@ -181,7 +181,7 @@ DETAIL:&nbsp;<A HREF="#field_detail">FIELD</A>&nbsp;|&nbsp;<A HREF="#constructor
    <TR BGCOLOR="white" CLASS="TableRowColor">
       <TD ALIGN="right" VALIGN="top" WIDTH="1%">
 	 <FONT SIZE="-1">
-	    <CODE><TMPL_IF NAME="is_class_method">&lt;static&gt;</TMPL_IF><TMPL_IF NAME="is_private">&nbsp;&lt;private&gt; </TMPL_IF>&nbsp;function</CODE>
+	    <CODE><TMPL_IF NAME="is_class_method">&lt;static&gt;</TMPL_IF><TMPL_IF NAME="is_private">&nbsp;&lt;private&gt; </TMPL_IF>&nbsp;<TMPL_VAR NAME="type"></CODE>
 	 </FONT>
       </TD>
       <TD>
@@ -232,7 +232,7 @@ DETAIL:&nbsp;<A HREF="#field_detail">FIELD</A>&nbsp;|&nbsp;<A HREF="#constructor
 <A NAME="<TMPL_VAR NAME="field_name">"><!-- --></A><H3>
 <TMPL_VAR NAME="field_name"></H3>
 <PRE>
-<TMPL_IF NAME="is_class_field">&lt;static&gt; </TMPL_IF>var <B><TMPL_VAR NAME="field_name"></B></PRE>
+<TMPL_IF NAME="is_private">&lt;private&gt;&nbsp;</TMPL_IF><TMPL_IF NAME="is_class_field">&lt;static&gt; </TMPL_IF><TMPL_IF NAME="is_final">&nbsp;&lt;final&gt;</TMPL_IF> <TMPL_VAR NAME="type"> <B><TMPL_VAR NAME="field_name"></B></PRE>
 <DL>
 <DL>
 <TMPL_VAR NAME="field_description">
@@ -291,7 +291,7 @@ function <B><TMPL_VAR name="classname"></B><TMPL_VAR name="constructor_args"></P
 <A NAME="<TMPL_VAR name="method_name">"><!-- --></A><H3>
 <TMPL_VAR name="method_name"></H3>
 <PRE>
-<TMPL_IF NAME="is_class_method">&lt;static&gt; </TMPL_IF><TMPL_IF NAME="is_private">&nbsp;&lt;private&gt; </TMPL_IF>function <B><TMPL_VAR name="method_name"></B><TMPL_VAR name="method_arguments"></PRE>
+<TMPL_IF NAME="is_class_method">&lt;static&gt; </TMPL_IF><TMPL_IF NAME="is_private">&nbsp;&lt;private&gt; </TMPL_IF><TMPL_VAR NAME="type"> <B><TMPL_VAR name="method_name"></B><TMPL_VAR name="method_arguments"></PRE>
 <DL>
 <DD><TMPL_VAR name="method_description">
 <P>

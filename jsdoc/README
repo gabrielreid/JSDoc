@@ -19,6 +19,9 @@ shown below:
 OR
     perl jsdoc.pl test.js
 
+Further information about using JsDoc can be found at 
+http://jsdoc.sourceforge.net
+
 If there are any questions, comments, problems or anything else, please 
 contact Gabriel Reid (gab_reid@users.sourceforge.net). This application has 
 been successfully tested on Linux (Debian and Redhat), and Windows 2000 with 

@@ -3,7 +3,7 @@
 #
 # This program makes use of the JSDoc module to make a JavaDoc equivalent
 # for JavaScript. The template that is used is based on the JavaDoc
-# doclet. This script only needs to be invoked with one or more 
+# doclet. This program only needs to be invoked with one or more 
 # JS OO sourcefiles as command-line args.
 #
 
@@ -81,7 +81,7 @@ sub output_class_templates {
       my $classname = $CLASSNAMES[$i]->{classname};
       
       # Template Parameters
-      my ($class, $subclasses, $class_summary, $constructor_params, 
+      my ($class, $subclasses, $class_summary, @constructor_params, 
          $next_class, $prev_class);
 
       $class= $$CLASSES{$classname};
@@ -89,8 +89,8 @@ sub output_class_templates {
       &add_to_index($class, $classname);
 
       # Set up the constructor and class information
-      $constructor_params = $class->{constructor_params}
-         or $constructor_params = [];
+      &resolve_synonyms($class->{constructor_vars});
+      @constructor_params = &fetch_args($class->{constructor_vars}, $class->{constructor_args});
       $class_summary = &resolve_inner_links($class->{constructor_summary});
       $class_summary =~ s/TODO:/<br><b>TODO:<\/b>/g if $class_summary;
       $class_summary .= &format_class_attributes($class->{constructor_vars});
@@ -109,7 +109,7 @@ sub output_class_templates {
       $TMPL->param(prev_class => $prev_class);
       $TMPL->param(superclass => $class->{extends});
       $TMPL->param(constructor_args => $class->{constructor_args});
-      $TMPL->param(constructor_params => $constructor_params);
+      $TMPL->param(constructor_params => \@constructor_params);
       $TMPL->param(class_summary => $class_summary);
       $TMPL->param(classname => $classname);
       $TMPL->param(subclasses=> $subclasses);
@@ -156,7 +156,7 @@ sub output_aux_templates(){
    $DEFAULT_CLASSNAME = $CLASSNAMES[0]->{classname};
    $TMPL->param(CLASSNAMES => \@CLASSNAMES);
    $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(logo => $OPTIONS{LOGO});
+   $TMPL->param(logo => basename($OPTIONS{LOGO}));
    open FILE, ">$OPTIONS{OUTPUT}allclasses-frame.html"
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
@@ -167,7 +167,7 @@ sub output_aux_templates(){
    $DEFAULT_CLASSNAME = $CLASSNAMES[0]->{classname};
    $TMPL->param(CLASSNAMES => \@CLASSNAMES);
    $TMPL->param(project_name => $OPTIONS{PROJECT_NAME});
-   $TMPL->param(logo => $OPTIONS{LOGO});
+   $TMPL->param(logo => basename($OPTIONS{LOGO}));
    open FILE, ">$OPTIONS{OUTPUT}allclasses-noframe.html"
       or die "Couldn't open file to write : $!\n";
    print FILE $TMPL->output;
@@ -310,14 +310,14 @@ sub find_subclasses(){
 
 #
 # Make a summary of a description, cutting it off either at the first
-# double newline or the first period.
+# double newline or the first period followed by whitespace.
 # PARAM: $description
 #
 sub get_summary {
    my ($description) = @_;
    my $summary;
    if ($description){
-      ($summary) = $description =~ /^(.*?(?:[\?\!\.]|\n\n)).*$/gs
+      ($summary) = $description =~ /^(.*?(?:[?!.](?=\s)|\n\n)).*$/gs
 	 or $summary = $description;
    } else {
       $summary = "";
@@ -336,11 +336,11 @@ sub map_methods{
    for my $method ( 
       sort {$a->{mapped_name} cmp $b->{mapped_name} }  
       @{$class->{instance_methods}}){
-         next if (!$OPTIONS{PRIVATE} && $method->{is_private});
-         my @args;
-         for (@{$method->{args}}){
-            push @args, $_;
-         }
+         &resolve_synonyms($method->{vars}); 
+         next if (!$OPTIONS{PRIVATE} && $method->{vars}->{private});
+         $method->{vars}->{returns}[0] = 
+            $method->{vars}->{returns}[0] || $method->{vars}->{return};
+         my @args = &fetch_args($method->{vars}, $method->{argument_list});
          push @methods, {
             method_description => &resolve_inner_links($method->{description}),
             method_summary => &resolve_inner_links(
@@ -348,19 +348,18 @@ sub map_methods{
             method_name => $method->{mapped_name},
             method_arguments => $method->{argument_list},
             method_params => \@args,
-            method_returns => $method->{returns},
+            method_returns => ref($method->{vars}->{returns}[0]) eq 'ARRAY' ? $method->{vars}->{returns}[0][0] : $method->{vars}->{returns}[0],
             is_class_method => 0,
-            is_private => $method->{is_private}, 
-            attributes => &format_method_attributes($method->{vars})
+            is_private => defined($method->{vars}->{private}), 
+            attributes => &format_method_attributes($method->{vars}),
+            type => &map_return_type($method)
             };
    }
-   for my $method( sort {$a->{mapped_name} cmp $b->{mapped_name} } 
+   for my $method ( sort {$a->{mapped_name} cmp $b->{mapped_name} } 
       @{$class->{class_methods}}){
-         next if (!$OPTIONS{PRIVATE} && $method->{is_private});
-         my @args;
-         for (@{$method->{args}}){
-            push @args, $_;
-         }
+         &resolve_synonyms($method->{vars}); 
+         next if (!$OPTIONS{PRIVATE} && $method->{vars}->{private});
+         my @args = &fetch_args($method->{vars}, $method->{argument_list});
          push @methods, {
             method_description => &resolve_inner_links($method->{description}),
             method_summary => &resolve_inner_links(
@@ -368,14 +367,30 @@ sub map_methods{
             method_name => $method->{mapped_name},
             method_arguments => $method->{argument_list},
             method_params => \@args,
-            method_returns => $method->{returns},
+            method_returns => $method->{vars}->{returns}[0],
             is_class_method => 1,
-            attributes => &format_method_attributes($method->{vars})
+            is_private => defined($method->{vars}->{private}), 
+            attributes => &format_method_attributes($method->{vars}),
+            type => &map_return_type($method)
             }; 
    }
    \@methods;
 }
 
+#
+# Map a function return type
+#
+sub map_return_type {
+   my ($method) = @_;
+   if ($method->{vars}->{type}[0]){
+      my ($name) = $method->{vars}->{type}[0] =~ /(\w+)/;
+      if ($$CLASSES{$name}){
+         return qq|<a href="$name.html">$name</a>|;
+      }
+      return $name;
+   }
+   return 'function';
+}
 
 #
 # Set up all the instance and class methods for one template
@@ -387,12 +402,17 @@ sub map_fields {
    # Set up the instance fields
    for (sort {$a->{field_name} cmp $b->{field_name} } 
       @{$class->{instance_fields}}){
+         &resolve_synonyms($_->{field_vars});
+         next if (!$OPTIONS{PRIVATE} && $_->{field_vars}->{private});
          push @fields, { 
          field_name => $_->{field_name}, 
          field_description => &resolve_inner_links($_->{field_description}), 
          field_summary => &resolve_inner_links(
             &get_summary($_->{field_description})),
-         is_class_field => 0
+         is_final => defined($_->{field_vars}->{final}),
+         is_private => defined($_->{field_vars}->{private}),
+         is_class_field => 0,
+         type => &map_field_type($_)
          };
    }
 
@@ -401,18 +421,39 @@ sub map_fields {
    if ($class->{class_fields}){
       for (sort {$a->{field_name} cmp $b->{field_name} } 
          @{$class->{class_fields}}){
+            &resolve_synonyms($_->{field_vars});
+            next if (!$OPTIONS{PRIVATE} && $_->{field_vars}->{private});
             push @fields, { 
                field_name => $_->{field_name}, 
                field_description => &resolve_inner_links( 
                   $_->{field_description}), 
                field_summary => &resolve_inner_links(
                   &get_summary($_->{field_description})),
-               is_class_field => 1
+               is_final => defined($_->{field_vars}->{final}),
+               is_private => defined($_->{field_vars}->{private}),
+               is_class_field => 1,
+               type => &map_field_type($_)
                };
       }
    }
    \@fields;
 }
+
+#
+# Map a field type
+#
+sub map_field_type {
+   my ($field) = @_;
+   if ($field->{field_vars}->{type}[0]){
+      my ($name) = $field->{field_vars}->{type}[0] =~ /(\w+)/;
+      if ($$CLASSES{$name}){
+         return qq|<a href="$name.html">$name</a>|;
+      }
+      return $name;
+   }
+   return 'var';
+}
+
 
 #
 # Map all the inherited methods to a template parameter
@@ -432,7 +473,7 @@ sub map_method_inheritance {
             push @method_inheritance, {
                superclass_name => $superclassname,
                inherited_methods => join(', ', 
-                     map(qq|<a href="$superclassname.html#$_">$_</a>|, @$methods))};
+                     map(qq|<a href="$superclassname.html#$_">$_</a>|, &filter_private_methods($methods, $superclassname)))};
          }
          $superclassname = $superclass->{extends};
          if ($superclassname){
@@ -463,7 +504,7 @@ sub map_field_inheritance {
                {
                   superclass_name => $superclassname,
                   inherited_fields => join(', ', 
-                     map(qq|<a href="$superclassname.html#$_->{field_name}">$_->{field_name}</a>|, @$fields))};
+                     map(qq|<a href="$superclassname.html#$_">$_</a>|, &filter_private_fields($fields, $superclassname)))};
          }
          $superclassname = $superclass->{extends};
          if ($superclassname){
@@ -474,6 +515,38 @@ sub map_field_inheritance {
       }
    }
    \@field_inheritance;
+}
+
+#
+# Filter out private inherited methods
+#
+sub filter_private_methods {
+   my ($methods, $superclassname) = @_;
+   my @visible_methods;
+   for my $method(@$methods){
+      for my $super_method (@{$$CLASSES{$superclassname}->{instance_methods}}){
+         push @visible_methods, $method 
+            if $method eq $super_method->{mapped_name} and 
+               (!$super_method->{vars}->{private} || $OPTIONS{PRIVATE});
+      }
+   }
+   @visible_methods;
+}
+
+#
+# Filter out private inherited fields
+#
+sub filter_private_fields {
+   my ($fields, $superclassname) = @_;
+   my @visible_fields;
+   for my $field (map {$_->{field_name}} @$fields){
+      for my $super_field(@{$$CLASSES{$superclassname}->{instance_fields}}){
+         push @visible_fields, $field
+            if $field eq $super_field->{field_name} and
+               (!$super_field->{field_vars}->{private} || $OPTIONS{PRIVATE});
+      }
+   }
+   @visible_fields;
 }
 
 #
@@ -505,7 +578,7 @@ sub add_to_index {
             class => $classname,
             type => 'Class method in ',
             linkname => $method->{mapped_name}
-         } unless ($method->{is_private} and not $OPTIONS{PRIVATE});
+         } unless ($method->{vars}->{private} and not $OPTIONS{PRIVATE});
    }
    for my $method (@{$class->{instance_methods}}){
       push @INDEX, 
@@ -514,7 +587,7 @@ sub add_to_index {
             class => $classname,
             type => 'Instance method in ',
             linkname => $method->{mapped_name}
-         } unless ($method->{is_private} and not $OPTIONS{PRIVATE});
+         } unless ($method->{vars}->{private} and not $OPTIONS{PRIVATE});
 
    }
    for my $class_field (@{$class->{class_fields}}){
@@ -601,7 +674,6 @@ sub build_tree
 # Outputs the overview tree
 #
 sub output_tree_template {
-   
    $TMPL = new HTML::Template( 
       die_on_bad_params => 0, 
       filename => TREE_TMPL);
@@ -746,4 +818,36 @@ sub initialize_param_maps {
          }
    );
    $METHOD_ATTRS_MAP{exception} = $METHOD_ATTRS_MAP{throws};
+}
+
+
+# 
+# Parse the @param or @argument values into name/value pairs and 
+# return the list of them
+#
+sub fetch_args {
+   my ($vars, $arg_list) = @_;
+   return unless $vars and $arg_list;
+   my (@args, %used);
+   for my $arg (split /\W+/, ($arg_list =~ /\(([^)]*)/)[0]){
+      for (@{$vars->{param}}){
+         my ($name, $value) = (/(\w+)(.*)/)[0, 1];
+         next unless $name eq $arg;
+         $used{$name} = 1;
+         push @args, {varname => $name, vardescrip => $value};
+      }
+   }
+   for (@{$vars->{param}}){
+      my ($name, $value) = (/(\w+)(.*)/)[0, 1];
+      next if $used{$name};
+      push @args, {varname => $name, vardescrip => $value};
+   }
+   @args;
+}
+
+sub resolve_synonyms {
+   my ($item) = @_;
+   $item->{param} = $item->{param} || $item->{argument};
+   $item->{returns} = $item->{return} || $item->{returns};
+   $item->{final} = $item->{final} || $item->{const};
 }
