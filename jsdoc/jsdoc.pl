@@ -12,7 +12,7 @@ use HTML::Template;
 use File::Copy;
 use File::Basename;
 use Getopt::Long;
-use Data::Dumper;
+use File::Find;
 use JSDoc;
 
 
@@ -42,7 +42,7 @@ $TMPL = new HTML::Template(
    die_on_bad_params => 0, 
    filename => MAIN_TMPL);
 
-if (@ARGV < 1 || $OPTIONS{HELP}){
+if (@ARGV < 1 || $OPTIONS{HELP} || !(&load_sources())){
    warn "No sourcefiles supplied\n" if !$OPTIONS{HELP};
    &show_usage();
    exit(1);
@@ -52,8 +52,7 @@ mkdir($OPTIONS{OUTPUT})
    or die "Can't create output directory $OPTIONS{OUTPUT}: $!\n" 
    unless (-e $OPTIONS{OUTPUT} && -d $OPTIONS{OUTPUT});
 
-# Load all of the JS source code and parse it into a code tree
-&load_sources();
+# Parse the code tree
 $CLASSES = &parse_code_tree(\$JS_SRC);
 &output_class_templates();
 &output_index_template();
@@ -195,8 +194,9 @@ sub build_class_tree {
 # Shown if no commandline args are given
 #
 sub show_usage(){
-   print qq{Usage: jsdoc [OPTIONS] <js_sourcefile>+
+   print qq{Usage: jsdoc [OPTIONS] <js sourcefiles and/or directories>+
    -h | --help          Show this message and exit
+   -r | --recursive     Recurse through given directories
    -p | --private       Show private methods
    -d | --directory     Specify output directory (defaults to js_docs_out)\n};
 }
@@ -205,12 +205,30 @@ sub show_usage(){
 # Take all the command line args as filenames and add them to the source
 #
 sub load_sources(){
-   for (@ARGV){
+   my @files;
+   for my $arg (@ARGV){
+      if (-d $arg){
+         $arg =~ s/(.*[^\/])$/$1\//; 
+         find( { 
+            wanted => sub { 
+                  push @files, $_ if 
+                     (-f $_ && /.+\.js$/i) && 
+                     (/$arg[^\/]+$/ || $OPTIONS{RECURSIVE}) 
+               }, 
+            no_chdir => 1 }, $arg);
+      } elsif (-f $arg){
+         push @files, $arg;
+      }   
+   }
+   return 0 unless @files;
+   for (@files){
+      print "Loading sources from $_\n";
       open SRC, "<$_" or  (warn "Can't open $_, skipping: $!\n" and next);
       local $/ = undef;
       $JS_SRC .= <SRC>;
       close SRC;
    }
+   1;
 }
 
 #
@@ -526,7 +544,8 @@ sub parse_cmdline {
    GetOptions(
       'private|p'       => \$OPTIONS{PRIVATE},
       'directory|d=s'   => \$OPTIONS{OUTPUT},
-      'help|h'          => \$OPTIONS{HELP} 
+      'help|h'          => \$OPTIONS{HELP},
+      'recursive|r'     => \$OPTIONS{RECURSIVE}
    );
    $OPTIONS{OUTPUT} =~ s/([^\/])$/$1\//;
 }
